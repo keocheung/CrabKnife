@@ -17,7 +17,7 @@ pub(crate) enum Tool {
     Settings,
 }
 
-pub(crate) struct RustKnifeApp {
+pub(crate) struct CrabKnifeApp {
     active_tool: Tool,
     regex: RegexTool,
     hex: HexTool,
@@ -25,7 +25,7 @@ pub(crate) struct RustKnifeApp {
     font_needs_update: bool,
 }
 
-impl RustKnifeApp {
+impl CrabKnifeApp {
     pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let app = Self {
             active_tool: Tool::RegexTester,
@@ -45,22 +45,22 @@ impl RustKnifeApp {
         if let Some(font_data) = self.settings.ui_font_data() {
             fonts
                 .font_data
-                .insert("rust-knife-ui-font".to_owned(), Arc::new(font_data));
+                .insert("crab-knife-ui-font".to_owned(), Arc::new(font_data));
             fonts
                 .families
                 .entry(FontFamily::Proportional)
                 .or_default()
-                .insert(0, "rust-knife-ui-font".to_owned());
+                .insert(0, "crab-knife-ui-font".to_owned());
         }
         if let Some(font_data) = self.settings.editor_font_data() {
             fonts
                 .font_data
-                .insert("rust-knife-editor-font".to_owned(), Arc::new(font_data));
+                .insert("crab-knife-editor-font".to_owned(), Arc::new(font_data));
             fonts
                 .families
                 .entry(FontFamily::Monospace)
                 .or_default()
-                .insert(0, "rust-knife-editor-font".to_owned());
+                .insert(0, "crab-knife-editor-font".to_owned());
         }
         ctx.set_fonts(fonts);
 
@@ -99,7 +99,7 @@ impl RustKnifeApp {
 
     fn show_sidebar(&mut self, ui: &mut Ui) {
         ui.add_space(8.0);
-        ui.heading("RustKnife");
+        ui.heading("CrabKnife");
         ui.label(RichText::new("Developer tools").color(ui.visuals().weak_text_color()));
         ui.add_space(18.0);
 
@@ -138,7 +138,7 @@ impl RustKnifeApp {
     }
 }
 
-impl eframe::App for RustKnifeApp {
+impl eframe::App for CrabKnifeApp {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
 

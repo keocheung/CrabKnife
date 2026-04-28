@@ -1,6 +1,6 @@
-# RustKnife
+# CrabKnife
 
-RustKnife is a small desktop developer toolbox written in Rust with `egui`.
+CrabKnife is a small desktop developer toolbox written in Rust with `egui`.
 It currently implements the first tool: a Regex Tester inspired by DevToys, while
 keeping the interface close to native egui styling.
 

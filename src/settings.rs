@@ -180,7 +180,7 @@ impl Default for Settings {
 impl Settings {
     pub(crate) fn load() -> Self {
         let mut settings = Self::default();
-        let Some(path) = config_path() else {
+        let Some(path) = config_path().or_else(legacy_config_path) else {
             return settings;
         };
         let Ok(contents) = std::fs::read_to_string(path) else {
@@ -468,7 +468,24 @@ fn config_path() -> Option<PathBuf> {
     {
         std::env::var_os("LOCALAPPDATA")
             .map(PathBuf::from)
+            .map(|path| path.join("CrabKnife").join("config.toml"))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|path| path.join(".config").join("CrabKnife").join("config.toml"))
+    }
+}
+
+fn legacy_config_path() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
             .map(|path| path.join("RustKnife").join("config.toml"))
+            .filter(|path| path.exists())
     }
 
     #[cfg(not(target_os = "windows"))]
@@ -476,6 +493,7 @@ fn config_path() -> Option<PathBuf> {
         std::env::var_os("HOME")
             .map(PathBuf::from)
             .map(|path| path.join(".config").join("RustKnife").join("config.toml"))
+            .filter(|path| path.exists())
     }
 }
 

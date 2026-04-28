@@ -1,7 +1,7 @@
 use eframe::egui::{
     self, Align, CentralPanel, Color32, Context, FontData, FontDefinitions, FontFamily, FontId,
-    Frame, Layout, Margin, RichText, ScrollArea, SidePanel, Stroke, TextEdit, TextStyle,
-    TopBottomPanel, Ui, Vec2, ViewportBuilder,
+    Frame, Layout, Margin, Panel, RichText, ScrollArea, Stroke, TextBuffer, TextEdit, TextStyle,
+    Ui, Vec2, ViewportBuilder,
     text::{LayoutJob, TextFormat},
 };
 use fontdb::{Database, Style, Weight};
@@ -77,7 +77,7 @@ impl RustKnifeApp {
         }
         ctx.set_fonts(fonts);
 
-        let mut style = (*ctx.style()).clone();
+        let mut style = (*ctx.global_style()).clone();
         let ui_size = self.settings.ui_font_size;
         let editor_size = self.settings.editor_font_size;
         let ui_family = self.settings.ui_font_family();
@@ -100,7 +100,7 @@ impl RustKnifeApp {
         ]
         .into();
         style.spacing.item_spacing = Vec2::new(10.0, 8.0);
-        ctx.set_style(style);
+        ctx.set_global_style(style);
     }
 
     fn show_sidebar(&mut self, ui: &mut Ui) {
@@ -137,27 +137,31 @@ impl RustKnifeApp {
 }
 
 impl eframe::App for RustKnifeApp {
-    fn update(&mut self, ctx: &Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
+        let ctx = ui.ctx().clone();
+
         if self.font_needs_update {
-            self.apply_font_settings(ctx);
+            self.apply_font_settings(&ctx);
             self.font_needs_update = false;
         }
 
-        SidePanel::left("tools")
-            .resizable(false)
-            .exact_width(220.0)
-            .frame(Frame::side_top_panel(&ctx.style()).inner_margin(Margin::same(18)))
-            .show(ctx, |ui| self.show_sidebar(ui));
+        let style = ctx.global_style();
 
-        TopBottomPanel::top("header")
+        Panel::left("tools")
             .resizable(false)
-            .exact_height(64.0)
-            .frame(Frame::side_top_panel(&ctx.style()).inner_margin(Margin::symmetric(22, 12)))
-            .show(ctx, |ui| self.show_header(ui));
+            .exact_size(220.0)
+            .frame(Frame::side_top_panel(&style).inner_margin(Margin::same(18)))
+            .show_inside(ui, |ui| self.show_sidebar(ui));
+
+        Panel::top("header")
+            .resizable(false)
+            .exact_size(64.0)
+            .frame(Frame::side_top_panel(&style).inner_margin(Margin::symmetric(22, 12)))
+            .show_inside(ui, |ui| self.show_header(ui));
 
         CentralPanel::default()
-            .frame(Frame::central_panel(&ctx.style()).inner_margin(Margin::same(22)))
-            .show(ctx, |ui| match self.active_tool {
+            .frame(Frame::central_panel(&style).inner_margin(Margin::same(22)))
+            .show_inside(ui, |ui| match self.active_tool {
                 Tool::RegexTester => self.regex.ui(ui),
                 Tool::Settings => {
                     if self.settings.ui(ui) {
@@ -254,17 +258,17 @@ impl RegexTool {
                 ui.add_space(14.0);
                 panel(ui, "Test Text", |ui| {
                     let highlight_regex = result.as_ref().ok().cloned();
-                    let mut layouter = move |ui: &Ui, text: &str, wrap_width: f32| {
+                    let mut layouter = move |ui: &Ui, text: &dyn TextBuffer, wrap_width: f32| {
                         let font_id = TextStyle::Monospace.resolve(ui.style());
                         let text_color = ui.visuals().text_color();
                         let job = highlighted_text_job(
-                            text,
+                            text.as_str(),
                             highlight_regex.as_ref(),
                             font_id,
                             text_color,
                             wrap_width,
                         );
-                        ui.fonts(|fonts| fonts.layout_job(job))
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
                     };
 
                     ui.add(

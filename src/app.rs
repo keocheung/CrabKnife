@@ -6,18 +6,21 @@ use eframe::egui::{
 };
 
 use crate::settings::Settings;
+use crate::tools::hex::HexTool;
 use crate::tools::regex::RegexTool;
 use crate::ui::nav_button;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Tool {
     RegexTester,
+    HexToString,
     Settings,
 }
 
 pub(crate) struct RustKnifeApp {
     active_tool: Tool,
     regex: RegexTool,
+    hex: HexTool,
     settings: Settings,
     font_needs_update: bool,
 }
@@ -27,6 +30,7 @@ impl RustKnifeApp {
         let app = Self {
             active_tool: Tool::RegexTester,
             regex: RegexTool::default(),
+            hex: HexTool::default(),
             settings: Settings::load(),
             font_needs_update: true,
         };
@@ -106,6 +110,13 @@ impl RustKnifeApp {
             ".*",
             "Regex Tester",
         );
+        nav_button(
+            ui,
+            &mut self.active_tool,
+            Tool::HexToString,
+            "0x",
+            "Hex to String",
+        );
         nav_button(ui, &mut self.active_tool, Tool::Settings, "Aa", "Settings");
 
         ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
@@ -117,6 +128,7 @@ impl RustKnifeApp {
         ui.horizontal(|ui| {
             ui.heading(match self.active_tool {
                 Tool::RegexTester => "Regex Tester",
+                Tool::HexToString => "Hex to String",
                 Tool::Settings => "Settings",
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -153,6 +165,7 @@ impl eframe::App for RustKnifeApp {
             .frame(Frame::central_panel(&style).inner_margin(Margin::same(22)))
             .show_inside(ui, |ui| match self.active_tool {
                 Tool::RegexTester => self.regex.ui(ui),
+                Tool::HexToString => self.hex.ui(ui),
                 Tool::Settings => {
                     if self.settings.ui(ui) {
                         self.font_needs_update = true;

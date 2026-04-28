@@ -50,7 +50,7 @@ impl RustKnifeApp {
             font_needs_update: true,
         };
 
-        cc.egui_ctx.set_visuals(egui::Visuals::light());
+        cc.egui_ctx.set_theme(egui::ThemePreference::System);
         app.apply_font_settings(&cc.egui_ctx);
         app
     }
@@ -79,36 +79,43 @@ impl RustKnifeApp {
         }
         ctx.set_fonts(fonts);
 
-        let mut style = (*ctx.global_style()).clone();
         let ui_size = self.settings.ui_font_size;
         let editor_size = self.settings.editor_font_size;
         let ui_family = self.settings.ui_font_family();
         let editor_family = self.settings.editor_font_family();
-        style.text_styles = [
-            (
-                TextStyle::Heading,
-                FontId::new(ui_size + 8.0, ui_family.clone()),
-            ),
-            (TextStyle::Body, FontId::new(ui_size, ui_family.clone())),
-            (
-                TextStyle::Monospace,
-                FontId::new(editor_size, editor_family),
-            ),
-            (TextStyle::Button, FontId::new(ui_size, ui_family.clone())),
-            (
-                TextStyle::Small,
-                FontId::new((ui_size - 2.0).max(10.0), ui_family),
-            ),
-        ]
-        .into();
-        style.spacing.item_spacing = Vec2::new(10.0, 8.0);
-        ctx.set_global_style(style);
+        ctx.all_styles_mut(|style| {
+            style.text_styles = [
+                (
+                    TextStyle::Heading,
+                    FontId::new(ui_size + 8.0, ui_family.clone()),
+                ),
+                (TextStyle::Body, FontId::new(ui_size, ui_family.clone())),
+                (
+                    TextStyle::Monospace,
+                    FontId::new(editor_size, editor_family.clone()),
+                ),
+                (TextStyle::Button, FontId::new(ui_size, ui_family.clone())),
+                (
+                    TextStyle::Small,
+                    FontId::new((ui_size - 2.0).max(10.0), ui_family.clone()),
+                ),
+            ]
+            .into();
+            style.spacing.item_spacing = Vec2::new(10.0, 8.0);
+        });
+        ctx.style_mut_of(egui::Theme::Dark, |style| {
+            style.visuals.weak_text_color = Some(Color32::from_gray(215));
+            style.visuals.window_fill = Color32::from_gray(14);
+            style.visuals.panel_fill = Color32::from_gray(14);
+            style.visuals.extreme_bg_color = Color32::from_gray(2);
+            style.visuals.text_edit_bg_color = Some(Color32::from_gray(4));
+        });
     }
 
     fn show_sidebar(&mut self, ui: &mut Ui) {
         ui.add_space(8.0);
         ui.heading("RustKnife");
-        ui.label(RichText::new("Developer tools").color(Color32::from_gray(100)));
+        ui.label(RichText::new("Developer tools").color(ui.visuals().weak_text_color()));
         ui.add_space(18.0);
 
         nav_button(
@@ -121,7 +128,7 @@ impl RustKnifeApp {
         nav_button(ui, &mut self.active_tool, Tool::Settings, "Aa", "Settings");
 
         ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-            ui.label(RichText::new("v0.1.0").color(Color32::from_gray(130)));
+            ui.label(RichText::new("v0.1.0").color(ui.visuals().weak_text_color()));
         });
     }
 
@@ -132,7 +139,7 @@ impl RustKnifeApp {
                 Tool::Settings => "Settings",
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(RichText::new("English").color(Color32::from_gray(100)));
+                ui.label(RichText::new("English").color(ui.visuals().weak_text_color()));
             });
         });
     }
@@ -254,7 +261,7 @@ impl RegexTool {
 
                     if let Err(error) = &result {
                         ui.add_space(8.0);
-                        ui.colored_label(Color32::from_rgb(176, 42, 55), error.to_string());
+                        ui.colored_label(ui.visuals().error_fg_color, error.to_string());
                     }
                 });
 
@@ -263,12 +270,13 @@ impl RegexTool {
                     let highlight_regex = result.as_ref().ok().cloned();
                     let mut layouter = move |ui: &Ui, text: &dyn TextBuffer, wrap_width: f32| {
                         let font_id = TextStyle::Monospace.resolve(ui.style());
-                        let text_color = ui.visuals().text_color();
+                        let visuals = ui.visuals();
                         let job = highlighted_text_job(
                             text.as_str(),
                             highlight_regex.as_ref(),
                             font_id,
-                            text_color,
+                            visuals.text_color(),
+                            visuals.dark_mode,
                             wrap_width,
                         );
                         ui.fonts_mut(|fonts| fonts.layout_job(job))
@@ -297,7 +305,8 @@ impl RegexTool {
     fn match_list(&self, ui: &mut Ui, regex: Option<&Regex>) {
         let Some(regex) = regex else {
             ui.label(
-                RichText::new("Fix the pattern to see matches.").color(Color32::from_gray(110)),
+                RichText::new("Fix the pattern to see matches.")
+                    .color(ui.visuals().weak_text_color()),
             );
             return;
         };
@@ -314,7 +323,7 @@ impl RegexTool {
         ui.separator();
 
         if captures.is_empty() {
-            ui.label(RichText::new("No matches.").color(Color32::from_gray(110)));
+            ui.label(RichText::new("No matches.").color(ui.visuals().weak_text_color()));
             return;
         }
 
@@ -335,7 +344,7 @@ impl RegexTool {
                                     ui.label(
                                         RichText::new(format!("{}..{}", mat.start(), mat.end()))
                                             .monospace()
-                                            .color(Color32::from_gray(105)),
+                                            .color(ui.visuals().weak_text_color()),
                                     );
                                 });
                             });
@@ -359,7 +368,7 @@ impl RegexTool {
                                         groups.len(),
                                         if groups.len() == 1 { "group" } else { "groups" }
                                     ))
-                                    .color(Color32::from_gray(105)),
+                                    .color(ui.visuals().weak_text_color()),
                                 );
 
                                 for (group_index, group) in groups {
@@ -376,7 +385,7 @@ impl RegexTool {
                                                 group.end()
                                             ))
                                             .monospace()
-                                            .color(Color32::from_gray(105)),
+                                            .color(ui.visuals().weak_text_color()),
                                         );
                                         ui.label(RichText::new(group.as_str()).monospace());
                                     });
@@ -400,6 +409,7 @@ fn highlighted_text_job(
     regex: Option<&Regex>,
     font_id: FontId,
     text_color: Color32,
+    dark_mode: bool,
     wrap_width: f32,
 ) -> LayoutJob {
     let mut ranges = Vec::new();
@@ -410,7 +420,7 @@ fn highlighted_text_job(
                 push_highlight(
                     &mut ranges,
                     mat.start()..mat.end(),
-                    Color32::from_rgb(255, 242, 178),
+                    match_background(dark_mode),
                     1,
                 );
             }
@@ -420,7 +430,7 @@ fn highlighted_text_job(
                     push_highlight(
                         &mut ranges,
                         group.start()..group.end(),
-                        group_background(group_index),
+                        group_background(group_index, dark_mode),
                         10 + group_index,
                     );
                 }
@@ -508,15 +518,31 @@ fn group_color(group_index: usize) -> Color32 {
     COLORS[(group_index - 1) % COLORS.len()]
 }
 
-fn group_background(group_index: usize) -> Color32 {
-    const COLORS: [Color32; 5] = [
+fn match_background(dark_mode: bool) -> Color32 {
+    if dark_mode {
+        Color32::from_rgb(54, 42, 12)
+    } else {
+        Color32::from_rgb(255, 242, 178)
+    }
+}
+
+fn group_background(group_index: usize, dark_mode: bool) -> Color32 {
+    const LIGHT_COLORS: [Color32; 5] = [
         Color32::from_rgb(205, 231, 255),
         Color32::from_rgb(231, 218, 255),
         Color32::from_rgb(207, 239, 222),
         Color32::from_rgb(255, 225, 201),
         Color32::from_rgb(255, 216, 225),
     ];
-    COLORS[(group_index - 1) % COLORS.len()]
+    const DARK_COLORS: [Color32; 5] = [
+        Color32::from_rgb(14, 40, 62),
+        Color32::from_rgb(42, 28, 66),
+        Color32::from_rgb(16, 48, 30),
+        Color32::from_rgb(56, 30, 12),
+        Color32::from_rgb(56, 22, 34),
+    ];
+    let colors = if dark_mode { DARK_COLORS } else { LIGHT_COLORS };
+    colors[(group_index - 1) % colors.len()]
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -770,7 +796,7 @@ impl Settings {
                 RichText::new(
                     "UI font is applied to navigation and labels. Editor font is applied to regex and text editors.",
                 )
-                .color(Color32::from_gray(100)),
+                .color(ui.visuals().weak_text_color()),
             );
         });
 

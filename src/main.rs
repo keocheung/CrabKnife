@@ -8,7 +8,9 @@ use fontdb::{Database, Style, Weight};
 use regex::{Regex, RegexBuilder};
 use std::collections::BTreeMap;
 use std::ops::Range;
+use std::path::PathBuf;
 use std::sync::Arc;
+use toml_edit::{DocumentMut, value};
 
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
@@ -44,7 +46,7 @@ impl RustKnifeApp {
         let app = Self {
             active_tool: Tool::RegexTester,
             regex: RegexTool::default(),
-            settings: Settings::default(),
+            settings: Settings::load(),
             font_needs_update: true,
         };
 
@@ -166,6 +168,7 @@ impl eframe::App for RustKnifeApp {
                 Tool::Settings => {
                     if self.settings.ui(ui) {
                         self.font_needs_update = true;
+                        self.settings.save();
                     }
                 }
             });
@@ -588,6 +591,77 @@ impl Default for Settings {
 }
 
 impl Settings {
+    fn load() -> Self {
+        let mut settings = Self::default();
+        let Some(path) = config_path() else {
+            return settings;
+        };
+        let Ok(contents) = std::fs::read_to_string(path) else {
+            return settings;
+        };
+        let Ok(config) = contents.parse::<DocumentMut>() else {
+            return settings;
+        };
+
+        if let Some(font) =
+            load_font_choice(&config, "ui_font", "ui_system_font", &settings.system_fonts)
+        {
+            settings.ui_font = font;
+        }
+        if let Some(font) = load_font_choice(
+            &config,
+            "editor_font",
+            "editor_system_font",
+            &settings.system_fonts,
+        ) {
+            settings.editor_font = font;
+        }
+        if let Some(size) = load_font_size(&config, "ui_font_size") {
+            settings.ui_font_size = size;
+        }
+        if let Some(size) = load_font_size(&config, "editor_font_size") {
+            settings.editor_font_size = size;
+        }
+        if let Some(path) = config
+            .get("custom_font_path")
+            .and_then(|value| value.as_str())
+        {
+            settings.custom_font_path = path.to_owned();
+            settings.load_custom_font();
+        }
+
+        settings
+    }
+
+    fn save(&self) {
+        let Some(path) = config_path() else {
+            return;
+        };
+        let mut config = DocumentMut::new();
+        save_font_choice(
+            &mut config,
+            "ui_font",
+            "ui_system_font",
+            &self.ui_font,
+            &self.system_fonts,
+        );
+        save_font_choice(
+            &mut config,
+            "editor_font",
+            "editor_system_font",
+            &self.editor_font,
+            &self.system_fonts,
+        );
+        config["custom_font_path"] = value(self.custom_font_path.clone());
+        config["ui_font_size"] = value(self.ui_font_size as f64);
+        config["editor_font_size"] = value(self.editor_font_size as f64);
+
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, config.to_string());
+    }
+
     fn ui_font_family(&self) -> FontFamily {
         match self.ui_font {
             FontChoice::System(_) | FontChoice::Custom => FontFamily::Proportional,
@@ -627,6 +701,25 @@ impl Settings {
 
     fn editor_font_data(&self) -> Option<FontData> {
         self.font_data_for(&self.editor_font)
+    }
+
+    fn load_custom_font(&mut self) {
+        if self.custom_font_path.trim().is_empty() {
+            self.custom_font_data = None;
+            self.custom_font_error = None;
+            return;
+        }
+
+        match std::fs::read(self.custom_font_path.trim()) {
+            Ok(bytes) => {
+                self.custom_font_data = Some(bytes);
+                self.custom_font_error = None;
+            }
+            Err(error) => {
+                self.custom_font_data = None;
+                self.custom_font_error = Some(error.to_string());
+            }
+        }
     }
 
     fn ui(&mut self, ui: &mut Ui) -> bool {
@@ -683,6 +776,71 @@ impl Settings {
 
         changed
     }
+}
+
+fn config_path() -> Option<PathBuf> {
+    #[cfg(target_os = "windows")]
+    {
+        std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .map(|path| path.join("RustKnife").join("config.toml"))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|path| path.join(".config").join("RustKnife").join("config.toml"))
+    }
+}
+
+fn load_font_choice(
+    config: &DocumentMut,
+    choice_key: &str,
+    system_key: &str,
+    system_fonts: &[SystemFont],
+) -> Option<FontChoice> {
+    match config.get(choice_key)?.as_str()? {
+        "proportional" => Some(FontChoice::Proportional),
+        "monospace" => Some(FontChoice::Monospace),
+        "custom" => Some(FontChoice::Custom),
+        "system" => {
+            let name = config.get(system_key)?.as_str()?;
+            system_fonts
+                .iter()
+                .position(|font| font.name == name)
+                .map(FontChoice::System)
+        }
+        _ => None,
+    }
+}
+
+fn save_font_choice(
+    config: &mut DocumentMut,
+    choice_key: &str,
+    system_key: &str,
+    choice: &FontChoice,
+    system_fonts: &[SystemFont],
+) {
+    match choice {
+        FontChoice::Proportional => config[choice_key] = value("proportional"),
+        FontChoice::Monospace => config[choice_key] = value("monospace"),
+        FontChoice::Custom => config[choice_key] = value("custom"),
+        FontChoice::System(index) => {
+            config[choice_key] = value("system");
+            if let Some(font) = system_fonts.get(*index) {
+                config[system_key] = value(font.name.clone());
+            }
+        }
+    }
+}
+
+fn load_font_size(config: &DocumentMut, key: &str) -> Option<f32> {
+    let value = config.get(key)?;
+    let size = value
+        .as_float()
+        .or_else(|| value.as_integer().map(|value| value as f64))? as f32;
+    (12.0..=24.0).contains(&size).then_some(size)
 }
 
 fn load_system_fonts() -> (Database, Vec<SystemFont>) {

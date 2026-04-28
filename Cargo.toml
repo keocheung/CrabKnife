@@ -5,5 +5,6 @@ edition = "2024"
 
 [dependencies]
 eframe = "0.34.1"
-fontdb = "0.16"
+fontdb = "0.23.0"
 regex = "1"
+toml_edit = "0.25.11"

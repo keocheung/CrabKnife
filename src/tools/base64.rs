@@ -11,7 +11,7 @@ pub(crate) struct Base64Tool {
 
 impl Default for Base64Tool {
     fn default() -> Self {
-        let plain_text = "Hello, RustKnife!".to_owned();
+        let plain_text = "Hello, CrabKnife!".to_owned();
         let base64_text = encode_text(&plain_text);
         Self {
             plain_text,
@@ -99,14 +99,14 @@ mod tests {
 
     #[test]
     fn encodes_plain_text() {
-        assert_eq!(encode_text("Hello, RustKnife!"), "SGVsbG8sIFJ1c3RLbmlmZSE=");
+        assert_eq!(encode_text("Hello, CrabKnife!"), "SGVsbG8sIFJ1c3RLbmlmZSE=");
     }
 
     #[test]
     fn decodes_base64_text() {
         assert_eq!(
             decode_text("SGVsbG8sIFJ1c3RLbmlmZSE=").unwrap(),
-            "Hello, RustKnife!"
+            "Hello, CrabKnife!"
         );
     }
 

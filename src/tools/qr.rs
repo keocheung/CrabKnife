@@ -319,7 +319,7 @@ mod tests {
 
     #[test]
     fn creates_qr_code_for_text() {
-        let (code, error) = build_qr_code("Hello, RustKnife!", ErrorCorrection::Medium);
+        let (code, error) = build_qr_code("Hello, CrabKnife!", ErrorCorrection::Medium);
 
         assert!(error.is_none());
         assert!(code.is_some());
@@ -335,7 +335,7 @@ mod tests {
 
     #[test]
     fn encodes_png_bytes() {
-        let (code, error) = build_qr_code("Hello, RustKnife!", ErrorCorrection::High);
+        let (code, error) = build_qr_code("Hello, CrabKnife!", ErrorCorrection::High);
         let bytes = qr_png_bytes(&code.unwrap(), 4, 4).unwrap();
 
         assert!(error.is_none());

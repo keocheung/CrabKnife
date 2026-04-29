@@ -60,7 +60,7 @@ pub(crate) struct HashTool {
 impl Default for HashTool {
     fn default() -> Self {
         let algorithm = HashAlgorithm::Sha256;
-        let input_text = "Hello, RustKnife!".to_owned();
+        let input_text = "Hello, CrabKnife!".to_owned();
         let output_text = hash_bytes(algorithm, input_text.as_bytes());
 
         Self {

@@ -1,3 +1,4 @@
+#[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -5,6 +6,7 @@ use eframe::egui::{
     self, Color32, FontData, FontFamily, FontTweak, RichText, ScrollArea, TextEdit, Ui, Vec2,
     epaint::text::VariationCoords,
 };
+#[cfg(not(target_arch = "wasm32"))]
 use fontdb::{Database, Family, Query, Stretch, Style, Weight};
 use toml_edit::{Array, DocumentMut, value};
 
@@ -42,6 +44,7 @@ impl FontChoice {
 
 struct SystemFont {
     name: String,
+    #[cfg(not(target_arch = "wasm32"))]
     id: fontdb::ID,
     monospaced: bool,
 }
@@ -119,6 +122,7 @@ impl FontWeightChoice {
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn weight(self) -> Weight {
         match self {
             Self::Thin => Weight::THIN,
@@ -138,6 +142,7 @@ pub(crate) struct Settings {
     ui_font: FontChoice,
     editor_font: FontChoice,
     system_fonts: Vec<SystemFont>,
+    #[cfg(not(target_arch = "wasm32"))]
     font_database: Database,
     custom_font_path: String,
     custom_font_data: Option<Vec<u8>>,
@@ -152,7 +157,11 @@ pub(crate) struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
+        #[cfg(not(target_arch = "wasm32"))]
         let (font_database, system_fonts) = load_system_fonts();
+        #[cfg(target_arch = "wasm32")]
+        let system_fonts: Vec<SystemFont> = Vec::new();
+
         let editor_font = system_fonts
             .iter()
             .position(|font| font.monospaced)
@@ -163,6 +172,7 @@ impl Default for Settings {
             ui_font: FontChoice::Proportional,
             editor_font,
             system_fonts,
+            #[cfg(not(target_arch = "wasm32"))]
             font_database,
             custom_font_path: String::new(),
             custom_font_data: None,
@@ -290,10 +300,13 @@ impl Settings {
         variations: &[FontVariationCoord],
     ) -> Option<FontData> {
         match choice {
+            #[cfg(not(target_arch = "wasm32"))]
             FontChoice::System(index) => {
                 let font = self.system_fonts.get(*index)?;
                 self.system_font_data(&font.name, Weight::NORMAL, variations)
             }
+            #[cfg(target_arch = "wasm32")]
+            FontChoice::System(_) => None,
             FontChoice::Custom => self
                 .custom_font_data
                 .as_ref()
@@ -308,15 +321,20 @@ impl Settings {
         weight: FontWeightChoice,
         variations: &[FontVariationCoord],
     ) -> Option<FontData> {
+        let _ = weight;
         match choice {
+            #[cfg(not(target_arch = "wasm32"))]
             FontChoice::System(index) => {
                 let font = self.system_fonts.get(*index)?;
                 self.system_font_data(&font.name, weight.weight(), variations)
             }
+            #[cfg(target_arch = "wasm32")]
+            FontChoice::System(_) => None,
             _ => self.font_data_for(choice, variations),
         }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn system_font_data(
         &self,
         family_name: &str,
@@ -601,6 +619,7 @@ fn with_font_variations(font_data: FontData, variations: &[FontVariationCoord]) 
     })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_system_fonts() -> (Database, Vec<SystemFont>) {
     let mut database = Database::new();
     database.load_system_fonts();
@@ -635,6 +654,7 @@ fn load_system_fonts() -> (Database, Vec<SystemFont>) {
     (database, fonts)
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn font_match_score(face: &fontdb::FaceInfo) -> u16 {
     let style_penalty = if face.style == Style::Normal { 0 } else { 1000 };
     let weight_penalty = face.weight.0.abs_diff(Weight::NORMAL.0);

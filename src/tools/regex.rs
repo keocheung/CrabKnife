@@ -1,4 +1,6 @@
+use std::iter::Peekable;
 use std::ops::Range;
+use std::str::CharIndices;
 
 use eframe::egui::{
     Align, Color32, FontId, Frame, Layout, Margin, RichText, ScrollArea, TextBuffer, TextEdit,
@@ -117,10 +119,24 @@ impl RegexTool {
             ui.vertical(|ui| {
                 ui.set_width((ui.available_width() * 0.55).max(420.0));
                 panel(ui, "Pattern", |ui| {
+                    let mut pattern_layouter =
+                        |ui: &Ui, text: &dyn TextBuffer, wrap_width: f32| {
+                            let font_id = TextStyle::Monospace.resolve(ui.style());
+                            let dark_mode = ui.visuals().dark_mode;
+                            let job = pattern_highlight_job(
+                                text.as_str(),
+                                font_id,
+                                ui.visuals().text_color(),
+                                dark_mode,
+                                wrap_width,
+                            );
+                            ui.fonts_mut(|fonts| fonts.layout_job(job))
+                        };
                     ui.add(
                         TextEdit::singleline(&mut self.pattern)
                             .font(TextStyle::Monospace)
                             .desired_width(f32::INFINITY)
+                            .layouter(&mut pattern_layouter)
                             .hint_text("Enter a Rust regex pattern"),
                     );
                     ui.add_space(8.0);
@@ -409,6 +425,321 @@ fn match_background(dark_mode: bool) -> Color32 {
         Color32::from_rgb(54, 42, 12)
     } else {
         Color32::from_rgb(255, 242, 178)
+    }
+}
+
+// --- Pattern syntax highlighting ---
+
+#[derive(Clone, Copy)]
+enum PatternTokenKind {
+    Literal,
+    Escape,
+    CharClass,
+    Quantifier,
+    Anchor,
+    Group,
+    Alternation,
+    Dot,
+}
+
+fn pattern_highlight_job(
+    pattern: &str,
+    font_id: FontId,
+    text_color: Color32,
+    dark_mode: bool,
+    wrap_width: f32,
+) -> LayoutJob {
+    let tokens = tokenize_pattern(pattern);
+    let mut job = LayoutJob::default();
+    job.wrap.max_width = wrap_width;
+
+    if tokens.is_empty() {
+        job.append(
+            pattern,
+            0.0,
+            TextFormat {
+                font_id,
+                color: text_color,
+                ..Default::default()
+            },
+        );
+        return job;
+    }
+
+    for (range, kind) in &tokens {
+        let color = match kind {
+            PatternTokenKind::Literal => text_color,
+            _ => pattern_token_color(*kind, dark_mode),
+        };
+        job.append(
+            &pattern[range.clone()],
+            0.0,
+            TextFormat {
+                font_id: font_id.clone(),
+                color,
+                ..Default::default()
+            },
+        );
+    }
+
+    job
+}
+
+fn pattern_token_color(kind: PatternTokenKind, dark_mode: bool) -> Color32 {
+    if dark_mode {
+        match kind {
+            PatternTokenKind::Escape | PatternTokenKind::Dot => Color32::from_rgb(86, 182, 194),
+            PatternTokenKind::CharClass => Color32::from_rgb(229, 192, 123),
+            PatternTokenKind::Group => Color32::from_rgb(198, 120, 221),
+            PatternTokenKind::Quantifier => Color32::from_rgb(209, 154, 102),
+            PatternTokenKind::Anchor | PatternTokenKind::Alternation => {
+                Color32::from_rgb(224, 108, 117)
+            }
+            PatternTokenKind::Literal => unreachable!(),
+        }
+    } else {
+        match kind {
+            PatternTokenKind::Escape | PatternTokenKind::Dot => Color32::from_rgb(1, 132, 188),
+            PatternTokenKind::CharClass => Color32::from_rgb(193, 132, 1),
+            PatternTokenKind::Group => Color32::from_rgb(166, 38, 164),
+            PatternTokenKind::Quantifier => Color32::from_rgb(152, 104, 1),
+            PatternTokenKind::Anchor | PatternTokenKind::Alternation => {
+                Color32::from_rgb(228, 86, 73)
+            }
+            PatternTokenKind::Literal => unreachable!(),
+        }
+    }
+}
+
+fn tokenize_pattern(pattern: &str) -> Vec<(Range<usize>, PatternTokenKind)> {
+    let mut tokens = Vec::new();
+    let mut chars = pattern.char_indices().peekable();
+
+    while let Some(&(i, ch)) = chars.peek() {
+        match ch {
+            '\\' => tokenize_escape(&mut chars, &mut tokens),
+            '[' => tokenize_char_class(&mut chars, &mut tokens),
+            '(' => tokenize_group_open(&mut chars, &mut tokens),
+            ')' => {
+                chars.next();
+                tokens.push((i..i + 1, PatternTokenKind::Group));
+            }
+            '*' | '+' => {
+                chars.next();
+                let mut end = i + 1;
+                if matches!(chars.peek(), Some(&(_, '?'))) {
+                    chars.next();
+                    end += 1;
+                }
+                tokens.push((i..end, PatternTokenKind::Quantifier));
+            }
+            '?' => {
+                chars.next();
+                tokens.push((i..i + 1, PatternTokenKind::Quantifier));
+            }
+            '{' => tokenize_repetition(&mut chars, &mut tokens),
+            '^' | '$' => {
+                chars.next();
+                tokens.push((i..i + 1, PatternTokenKind::Anchor));
+            }
+            '|' => {
+                chars.next();
+                tokens.push((i..i + 1, PatternTokenKind::Alternation));
+            }
+            '.' => {
+                chars.next();
+                tokens.push((i..i + 1, PatternTokenKind::Dot));
+            }
+            _ => {
+                chars.next();
+                tokens.push((i..i + ch.len_utf8(), PatternTokenKind::Literal));
+            }
+        }
+    }
+
+    tokens
+}
+
+fn tokenize_escape(
+    chars: &mut Peekable<CharIndices>,
+    tokens: &mut Vec<(Range<usize>, PatternTokenKind)>,
+) {
+    let (start, _) = chars.next().unwrap();
+    if let Some(&(_, esc)) = chars.peek() {
+        chars.next();
+        let end = start + 1 + esc.len_utf8();
+        let kind = match esc {
+            'b' | 'B' | 'A' | 'z' | 'Z' => PatternTokenKind::Anchor,
+            _ => PatternTokenKind::Escape,
+        };
+        tokens.push((start..end, kind));
+    } else {
+        tokens.push((start..start + 1, PatternTokenKind::Escape));
+    }
+}
+
+fn tokenize_char_class(
+    chars: &mut Peekable<CharIndices>,
+    tokens: &mut Vec<(Range<usize>, PatternTokenKind)>,
+) {
+    let (start, _) = chars.next().unwrap();
+    let mut end = start + 1;
+
+    if matches!(chars.peek(), Some(&(_, '^'))) {
+        let (j, c) = chars.next().unwrap();
+        end = j + c.len_utf8();
+    }
+    if matches!(chars.peek(), Some(&(_, ']'))) {
+        let (j, c) = chars.next().unwrap();
+        end = j + c.len_utf8();
+    }
+
+    while let Some(&(j, c)) = chars.peek() {
+        chars.next();
+        end = j + c.len_utf8();
+        if c == '\\' {
+            if let Some(&(j2, c2)) = chars.peek() {
+                chars.next();
+                end = j2 + c2.len_utf8();
+            }
+        } else if c == ']' {
+            break;
+        }
+    }
+
+    tokens.push((start..end, PatternTokenKind::CharClass));
+}
+
+fn tokenize_group_open(
+    chars: &mut Peekable<CharIndices>,
+    tokens: &mut Vec<(Range<usize>, PatternTokenKind)>,
+) {
+    let (start, _) = chars.next().unwrap();
+    let mut end = start + 1;
+
+    if !matches!(chars.peek(), Some(&(_, '?'))) {
+        tokens.push((start..end, PatternTokenKind::Group));
+        return;
+    }
+    chars.next();
+    end += 1;
+
+    match chars.peek() {
+        Some(&(_, ':')) | Some(&(_, '=')) | Some(&(_, '!')) => {
+            chars.next();
+            end += 1;
+        }
+        Some(&(_, '<')) => {
+            chars.next();
+            end += 1;
+            match chars.peek() {
+                Some(&(_, '=')) | Some(&(_, '!')) => {
+                    chars.next();
+                    end += 1;
+                }
+                _ => {
+                    while let Some(&(j, c)) = chars.peek() {
+                        chars.next();
+                        end = j + c.len_utf8();
+                        if c == '>' {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        Some(&(_, 'P')) => {
+            chars.next();
+            end += 1;
+            if matches!(chars.peek(), Some(&(_, '<'))) {
+                chars.next();
+                end += 1;
+                while let Some(&(j, c)) = chars.peek() {
+                    chars.next();
+                    end = j + c.len_utf8();
+                    if c == '>' {
+                        break;
+                    }
+                }
+            }
+        }
+        Some(&(_, c)) if "imsUux-".contains(c) => {
+            while let Some(&(j, c)) = chars.peek() {
+                if "imsUux-".contains(c) {
+                    chars.next();
+                    end = j + c.len_utf8();
+                } else {
+                    if c == ':' {
+                        chars.next();
+                        end = j + 1;
+                    }
+                    break;
+                }
+            }
+        }
+        _ => {}
+    }
+
+    tokens.push((start..end, PatternTokenKind::Group));
+}
+
+fn tokenize_repetition(
+    chars: &mut Peekable<CharIndices>,
+    tokens: &mut Vec<(Range<usize>, PatternTokenKind)>,
+) {
+    let (start, _) = chars.next().unwrap();
+    let mut end = start + 1;
+    let saved = chars.clone();
+
+    let mut has_digit = false;
+    while let Some(&(j, c)) = chars.peek() {
+        if c.is_ascii_digit() {
+            has_digit = true;
+            chars.next();
+            end = j + 1;
+        } else {
+            break;
+        }
+    }
+
+    let mut valid = false;
+    if has_digit {
+        match chars.peek() {
+            Some(&(j, '}')) => {
+                chars.next();
+                end = j + 1;
+                valid = true;
+            }
+            Some(&(_, ',')) => {
+                chars.next();
+                end += 1;
+                while let Some(&(j, c)) = chars.peek() {
+                    if c.is_ascii_digit() {
+                        chars.next();
+                        end = j + 1;
+                    } else {
+                        break;
+                    }
+                }
+                if let Some(&(j, '}')) = chars.peek() {
+                    chars.next();
+                    end = j + 1;
+                    valid = true;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if valid {
+        if matches!(chars.peek(), Some(&(_, '?'))) {
+            chars.next();
+            end += 1;
+        }
+        tokens.push((start..end, PatternTokenKind::Quantifier));
+    } else {
+        *chars = saved;
+        tokens.push((start..start + 1, PatternTokenKind::Literal));
     }
 }
 

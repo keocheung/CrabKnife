@@ -27,7 +27,10 @@ jobs:
 
             - uses: jetli/trunk-action@v0.5.1
               with:
-                  version: "latest"
+                  version: latest
+
+            - name: Build
+              run: trunk build --release
 
             - uses: actions/upload-pages-artifact@v3
               with:

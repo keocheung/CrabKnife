@@ -708,6 +708,9 @@ dependencies = [
  "fontdb",
  "regex",
  "toml_edit",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

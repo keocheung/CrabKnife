@@ -11,6 +11,7 @@ while keeping the interface close to native egui styling.
 - Hex to string decoding.
 - Base64 encoding and decoding.
 - Hash generation and comparison for common algorithms.
+- QR code generation with adjustable error correction and PNG export.
 - Separate UI and editor font settings.
 - System font selection through `fontdb`.
 

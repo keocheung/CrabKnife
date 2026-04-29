@@ -9,6 +9,7 @@ use crate::settings::Settings;
 use crate::tools::base64::Base64Tool;
 use crate::tools::hash::HashTool;
 use crate::tools::hex::HexTool;
+use crate::tools::qr::QrTool;
 use crate::tools::regex::RegexTool;
 use crate::ui::nav_button;
 
@@ -18,6 +19,7 @@ pub(crate) enum Tool {
     HexToString,
     Base64,
     Hash,
+    QrCode,
     Settings,
 }
 
@@ -27,6 +29,7 @@ pub(crate) struct CrabKnifeApp {
     hex: HexTool,
     base64: Base64Tool,
     hash: HashTool,
+    qr: QrTool,
     settings: Settings,
     font_needs_update: bool,
 }
@@ -39,6 +42,7 @@ impl CrabKnifeApp {
             hex: HexTool::default(),
             base64: Base64Tool::default(),
             hash: HashTool::default(),
+            qr: QrTool::default(),
             settings,
             font_needs_update: true,
         };
@@ -127,6 +131,7 @@ impl CrabKnifeApp {
         );
         nav_button(ui, &mut self.active_tool, Tool::Base64, "64", "Base64");
         nav_button(ui, &mut self.active_tool, Tool::Hash, "#", "Hash");
+        nav_button(ui, &mut self.active_tool, Tool::QrCode, "QR", "QR Code");
         nav_button(ui, &mut self.active_tool, Tool::Settings, "Aa", "Settings");
 
         ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
@@ -141,6 +146,7 @@ impl CrabKnifeApp {
                 Tool::HexToString => "Hex to String",
                 Tool::Base64 => "Base64",
                 Tool::Hash => "Hash",
+                Tool::QrCode => "QR Code",
                 Tool::Settings => "Settings",
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -189,6 +195,7 @@ impl eframe::App for CrabKnifeApp {
                 Tool::HexToString => self.hex.ui(ui),
                 Tool::Base64 => self.base64.ui(ui),
                 Tool::Hash => self.hash.ui(ui),
+                Tool::QrCode => self.qr.ui(ui),
                 Tool::Settings => {
                     if self.settings.ui(ui) {
                         self.font_needs_update = true;

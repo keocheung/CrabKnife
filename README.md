@@ -1,14 +1,16 @@
 # CrabKnife
 
-CrabKnife is a small desktop developer toolbox written in Rust with `egui`.
-It currently implements the first tool: a Regex Tester inspired by DevToys, while
-keeping the interface close to native egui styling.
+CrabKnife is a small desktop developer toolbox written in Rust with `egui`,
+while keeping the interface close to native egui styling.
 
 ## Features
 
 - Regex pattern testing with Rust's `regex` crate.
 - Match and capture group inspection.
 - Highlighted matches and capture groups in the test text editor.
+- Hex to string decoding.
+- Base64 encoding and decoding.
+- Hash generation and comparison for common algorithms.
 - Separate UI and editor font settings.
 - System font selection through `fontdb`.
 

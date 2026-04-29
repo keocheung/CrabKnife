@@ -6,6 +6,7 @@ use eframe::egui::{
 };
 
 use crate::settings::Settings;
+use crate::tools::base64::Base64Tool;
 use crate::tools::hex::HexTool;
 use crate::tools::regex::RegexTool;
 use crate::ui::nav_button;
@@ -14,6 +15,7 @@ use crate::ui::nav_button;
 pub(crate) enum Tool {
     RegexTester,
     HexToString,
+    Base64,
     Settings,
 }
 
@@ -21,6 +23,7 @@ pub(crate) struct CrabKnifeApp {
     active_tool: Tool,
     regex: RegexTool,
     hex: HexTool,
+    base64: Base64Tool,
     settings: Settings,
     font_needs_update: bool,
 }
@@ -31,6 +34,7 @@ impl CrabKnifeApp {
             active_tool: Tool::RegexTester,
             regex: RegexTool::default(),
             hex: HexTool::default(),
+            base64: Base64Tool::default(),
             settings,
             font_needs_update: true,
         };
@@ -117,6 +121,7 @@ impl CrabKnifeApp {
             "0x",
             "Hex to String",
         );
+        nav_button(ui, &mut self.active_tool, Tool::Base64, "64", "Base64");
         nav_button(ui, &mut self.active_tool, Tool::Settings, "Aa", "Settings");
 
         ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
@@ -129,6 +134,7 @@ impl CrabKnifeApp {
             ui.heading(match self.active_tool {
                 Tool::RegexTester => "Regex Tester",
                 Tool::HexToString => "Hex to String",
+                Tool::Base64 => "Base64",
                 Tool::Settings => "Settings",
             });
             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
@@ -175,6 +181,7 @@ impl eframe::App for CrabKnifeApp {
             .show_inside(ui, |ui| match self.active_tool {
                 Tool::RegexTester => self.regex.ui(ui),
                 Tool::HexToString => self.hex.ui(ui),
+                Tool::Base64 => self.base64.ui(ui),
                 Tool::Settings => {
                     if self.settings.ui(ui) {
                         self.font_needs_update = true;

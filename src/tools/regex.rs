@@ -43,9 +43,9 @@ struct GroupInfo {
 
 impl Default for RegexTool {
     fn default() -> Self {
-        let pattern = r"\b\w+@\w+\.\w+\b".to_owned();
-        let test_text = "Send logs to dev@example.com and security@example.org.\nInvalid: dev@local"
-            .to_owned();
+        let pattern = r"\b(\w+)@\w+\.\w+\b".to_owned();
+        let test_text =
+            "Send logs to dev@example.com and security@example.org.\nInvalid: dev@local".to_owned();
         let case_insensitive = false;
         let multi_line = true;
         let dot_matches_new_line = false;
@@ -119,19 +119,18 @@ impl RegexTool {
             ui.vertical(|ui| {
                 ui.set_width((ui.available_width() * 0.55).max(420.0));
                 panel(ui, "Pattern", |ui| {
-                    let mut pattern_layouter =
-                        |ui: &Ui, text: &dyn TextBuffer, wrap_width: f32| {
-                            let font_id = TextStyle::Monospace.resolve(ui.style());
-                            let dark_mode = ui.visuals().dark_mode;
-                            let job = pattern_highlight_job(
-                                text.as_str(),
-                                font_id,
-                                ui.visuals().text_color(),
-                                dark_mode,
-                                wrap_width,
-                            );
-                            ui.fonts_mut(|fonts| fonts.layout_job(job))
-                        };
+                    let mut pattern_layouter = |ui: &Ui, text: &dyn TextBuffer, wrap_width: f32| {
+                        let font_id = TextStyle::Monospace.resolve(ui.style());
+                        let dark_mode = ui.visuals().dark_mode;
+                        let job = pattern_highlight_job(
+                            text.as_str(),
+                            font_id,
+                            ui.visuals().text_color(),
+                            dark_mode,
+                            wrap_width,
+                        );
+                        ui.fonts_mut(|fonts| fonts.layout_job(job))
+                    };
                     ui.add(
                         TextEdit::singleline(&mut self.pattern)
                             .font(TextStyle::Monospace)
@@ -182,9 +181,7 @@ impl RegexTool {
 
             ui.add_space(14.0);
             ui.vertical(|ui| {
-                panel(ui, "Matches", |ui| {
-                    self.match_list(ui)
-                });
+                panel(ui, "Matches", |ui| self.match_list(ui));
             });
         });
     }

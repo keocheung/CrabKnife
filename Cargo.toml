@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+base64 = "0.22.1"
 eframe = "0.34.1"
 encoding_rs = "0.8.35"
 regex = "1"

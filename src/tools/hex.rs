@@ -59,7 +59,11 @@ impl HexTool {
                         RichText::new(format!(
                             "{} byte{} decoded. Non-hex characters are ignored.",
                             self.decoded_byte_count,
-                            if self.decoded_byte_count == 1 { "" } else { "s" }
+                            if self.decoded_byte_count == 1 {
+                                ""
+                            } else {
+                                "s"
+                            }
                         ))
                         .color(ui.visuals().weak_text_color()),
                     );

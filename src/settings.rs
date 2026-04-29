@@ -1,5 +1,6 @@
 #[cfg(not(target_arch = "wasm32"))]
 use std::collections::BTreeMap;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::PathBuf;
 
 use eframe::egui::{
@@ -190,10 +191,7 @@ impl Default for Settings {
 impl Settings {
     pub(crate) fn load() -> Self {
         let mut settings = Self::default();
-        let Some(path) = config_path().or_else(legacy_config_path) else {
-            return settings;
-        };
-        let Ok(contents) = std::fs::read_to_string(path) else {
+        let Some(contents) = Self::load_config_string() else {
             return settings;
         };
         let Ok(config) = contents.parse::<DocumentMut>() else {
@@ -239,9 +237,6 @@ impl Settings {
     }
 
     pub(crate) fn save(&self) {
-        let Some(path) = config_path() else {
-            return;
-        };
         let mut config = DocumentMut::new();
         save_font_choice(
             &mut config,
@@ -266,10 +261,7 @@ impl Settings {
         config["editor_font_variations"] =
             value(save_font_variations(&self.editor_font_variations));
 
-        if let Some(parent) = path.parent() {
-            let _ = std::fs::create_dir_all(parent);
-        }
-        let _ = std::fs::write(path, config.to_string());
+        Self::save_config_string(&config.to_string());
     }
 
     pub(crate) fn ui_font_size(&self) -> f32 {
@@ -381,6 +373,7 @@ impl Settings {
             return;
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
         match std::fs::read(self.custom_font_path.trim()) {
             Ok(bytes) => {
                 self.custom_font_data = Some(bytes);
@@ -391,6 +384,40 @@ impl Settings {
                 self.custom_font_error = Some(error.to_string());
             }
         }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn load_config_string() -> Option<String> {
+        let path = config_path().or_else(legacy_config_path)?;
+        std::fs::read_to_string(path).ok()
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn save_config_string(contents: &str) {
+        let Some(path) = config_path() else {
+            return;
+        };
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let _ = std::fs::write(path, contents);
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn load_config_string() -> Option<String> {
+        let storage = web_sys::window()?.local_storage().ok()??;
+        storage.get_item("crabknife_config").ok()?
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn save_config_string(contents: &str) {
+        let Some(storage) = web_sys::window()
+            .and_then(|w| w.local_storage().ok())
+            .flatten()
+        else {
+            return;
+        };
+        let _ = storage.set_item("crabknife_config", contents);
     }
 
     pub(crate) fn ui(&mut self, ui: &mut Ui) -> bool {
@@ -458,6 +485,7 @@ impl Settings {
                 &mut self.editor_font_variations,
             );
 
+            #[cfg(not(target_arch = "wasm32"))]
             if self.ui_font == FontChoice::Custom || self.editor_font == FontChoice::Custom {
                 ui.add_space(18.0);
                 changed |= custom_font_loader(
@@ -481,6 +509,7 @@ impl Settings {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn config_path() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
@@ -497,6 +526,7 @@ fn config_path() -> Option<PathBuf> {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn legacy_config_path() -> Option<PathBuf> {
     #[cfg(target_os = "windows")]
     {
@@ -782,6 +812,7 @@ fn font_variation_editor(
     *variations != original
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn custom_font_loader(
     ui: &mut Ui,
     custom_font_path: &mut String,

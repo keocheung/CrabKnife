@@ -15,4 +15,4 @@ fontdb = "0.23.0"
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
-web-sys = { version = "0.3", features = ["Document", "Window", "HtmlCanvasElement"] }
+web-sys = { version = "0.3", features = ["Document", "Window", "HtmlCanvasElement", "Storage"] }

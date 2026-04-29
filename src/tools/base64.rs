@@ -99,13 +99,13 @@ mod tests {
 
     #[test]
     fn encodes_plain_text() {
-        assert_eq!(encode_text("Hello, CrabKnife!"), "SGVsbG8sIFJ1c3RLbmlmZSE=");
+        assert_eq!(encode_text("Hello, CrabKnife!"), "SGVsbG8sIENyYWJLbmlmZSE=");
     }
 
     #[test]
     fn decodes_base64_text() {
         assert_eq!(
-            decode_text("SGVsbG8sIFJ1c3RLbmlmZSE=").unwrap(),
+            decode_text("SGVsbG8sIENyYWJLbmlmZSE=").unwrap(),
             "Hello, CrabKnife!"
         );
     }

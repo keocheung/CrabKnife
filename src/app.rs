@@ -26,12 +26,12 @@ pub(crate) struct CrabKnifeApp {
 }
 
 impl CrabKnifeApp {
-    pub(crate) fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    pub(crate) fn new(cc: &eframe::CreationContext<'_>, settings: Settings) -> Self {
         let app = Self {
             active_tool: Tool::RegexTester,
             regex: RegexTool::default(),
             hex: HexTool::default(),
-            settings: Settings::load(),
+            settings,
             font_needs_update: true,
         };
 
@@ -147,6 +147,15 @@ impl eframe::App for CrabKnifeApp {
             self.font_needs_update = false;
         }
 
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let vp = ctx.input(|i| i.viewport().clone());
+            if let (Some(outer), Some(inner)) = (vp.outer_rect, vp.inner_rect) {
+                self.settings
+                    .set_window_geometry([outer.min.x, outer.min.y], inner.size().into());
+            }
+        }
+
         let style = ctx.global_style();
 
         Panel::left("tools")
@@ -173,5 +182,10 @@ impl eframe::App for CrabKnifeApp {
                     }
                 }
             });
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn on_exit(&mut self) {
+        self.settings.save();
     }
 }

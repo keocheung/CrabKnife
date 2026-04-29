@@ -11,18 +11,30 @@ use app::CrabKnifeApp;
 fn main() -> eframe::Result {
     use eframe::egui::ViewportBuilder;
 
+    let settings = settings::Settings::load();
+
+    let mut viewport = ViewportBuilder::default()
+        .with_title("CrabKnife")
+        .with_min_inner_size([920.0, 620.0]);
+
+    if let Some([w, h]) = settings.window_size() {
+        viewport = viewport.with_inner_size([w, h]);
+    } else {
+        viewport = viewport.with_inner_size([1180.0, 760.0]);
+    }
+    if let Some([x, y]) = settings.window_position() {
+        viewport = viewport.with_position([x, y]);
+    }
+
     let options = eframe::NativeOptions {
-        viewport: ViewportBuilder::default()
-            .with_title("CrabKnife")
-            .with_inner_size([1180.0, 760.0])
-            .with_min_inner_size([920.0, 620.0]),
+        viewport,
         ..Default::default()
     };
 
     eframe::run_native(
         "CrabKnife",
         options,
-        Box::new(|cc| Ok(Box::new(CrabKnifeApp::new(cc)))),
+        Box::new(|cc| Ok(Box::new(CrabKnifeApp::new(cc, settings)))),
     )
 }
 
@@ -44,12 +56,13 @@ pub async fn start() -> Result<(), wasm_bindgen::JsValue> {
         .dyn_into::<web_sys::HtmlCanvasElement>()
         .expect("not a canvas element");
 
+    let settings = settings::Settings::load();
     let web_options = eframe::WebOptions::default();
     eframe::WebRunner::new()
         .start(
             canvas,
             web_options,
-            Box::new(|cc| Ok(Box::new(CrabKnifeApp::new(cc)))),
+            Box::new(|cc| Ok(Box::new(CrabKnifeApp::new(cc, settings)))),
         )
         .await?;
     Ok(())

@@ -154,6 +154,14 @@ pub(crate) struct Settings {
     editor_font_weight: FontWeightChoice,
     ui_font_variations: Vec<FontVariationCoord>,
     editor_font_variations: Vec<FontVariationCoord>,
+    #[cfg(not(target_arch = "wasm32"))]
+    window_x: Option<f32>,
+    #[cfg(not(target_arch = "wasm32"))]
+    window_y: Option<f32>,
+    #[cfg(not(target_arch = "wasm32"))]
+    window_width: Option<f32>,
+    #[cfg(not(target_arch = "wasm32"))]
+    window_height: Option<f32>,
 }
 
 impl Default for Settings {
@@ -184,6 +192,14 @@ impl Default for Settings {
             editor_font_weight: FontWeightChoice::Regular,
             ui_font_variations: Vec::new(),
             editor_font_variations: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            window_x: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            window_y: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            window_width: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            window_height: None,
         }
     }
 }
@@ -225,6 +241,13 @@ impl Settings {
         }
         settings.ui_font_variations = load_font_variations(&config, "ui_font_variations");
         settings.editor_font_variations = load_font_variations(&config, "editor_font_variations");
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            settings.window_x = load_f32(&config, "window_x");
+            settings.window_y = load_f32(&config, "window_y");
+            settings.window_width = load_f32(&config, "window_width");
+            settings.window_height = load_f32(&config, "window_height");
+        }
         if let Some(path) = config
             .get("custom_font_path")
             .and_then(|value| value.as_str())
@@ -260,6 +283,21 @@ impl Settings {
         config["ui_font_variations"] = value(save_font_variations(&self.ui_font_variations));
         config["editor_font_variations"] =
             value(save_font_variations(&self.editor_font_variations));
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some(x) = self.window_x {
+                config["window_x"] = value(x as f64);
+            }
+            if let Some(y) = self.window_y {
+                config["window_y"] = value(y as f64);
+            }
+            if let Some(w) = self.window_width {
+                config["window_width"] = value(w as f64);
+            }
+            if let Some(h) = self.window_height {
+                config["window_height"] = value(h as f64);
+            }
+        }
 
         Self::save_config_string(&config.to_string());
     }
@@ -270,6 +308,24 @@ impl Settings {
 
     pub(crate) fn editor_font_size(&self) -> f32 {
         self.editor_font_size
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn window_position(&self) -> Option<[f32; 2]> {
+        Some([self.window_x?, self.window_y?])
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn window_size(&self) -> Option<[f32; 2]> {
+        Some([self.window_width?, self.window_height?])
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn set_window_geometry(&mut self, pos: [f32; 2], size: [f32; 2]) {
+        self.window_x = Some(pos[0]);
+        self.window_y = Some(pos[1]);
+        self.window_width = Some(size[0]);
+        self.window_height = Some(size[1]);
     }
 
     pub(crate) fn ui_font_family(&self) -> FontFamily {
@@ -592,6 +648,16 @@ fn load_font_size(config: &DocumentMut, key: &str) -> Option<f32> {
         .as_float()
         .or_else(|| value.as_integer().map(|value| value as f64))? as f32;
     (12.0..=24.0).contains(&size).then_some(size)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn load_f32(config: &DocumentMut, key: &str) -> Option<f32> {
+    let value = config.get(key)?;
+    Some(
+        value
+            .as_float()
+            .or_else(|| value.as_integer().map(|v| v as f64))? as f32,
+    )
 }
 
 fn load_font_weight(config: &DocumentMut, key: &str) -> Option<FontWeightChoice> {

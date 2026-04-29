@@ -15,32 +15,103 @@ pub(crate) struct RegexTool {
     case_insensitive: bool,
     multi_line: bool,
     dot_matches_new_line: bool,
+    cached_pattern: String,
+    cached_case_insensitive: bool,
+    cached_multi_line: bool,
+    cached_dot_matches_new_line: bool,
+    cached_test_text: String,
+    cached_regex: Option<Regex>,
+    cached_error: Option<String>,
+    cached_matches: Vec<MatchInfo>,
+}
+
+struct MatchInfo {
+    text: String,
+    start: usize,
+    end: usize,
+    groups: Vec<GroupInfo>,
+}
+
+struct GroupInfo {
+    index: usize,
+    text: String,
+    start: usize,
+    end: usize,
 }
 
 impl Default for RegexTool {
     fn default() -> Self {
+        let pattern = r"\b\w+@\w+\.\w+\b".to_owned();
+        let test_text = "Send logs to dev@example.com and security@example.org.\nInvalid: dev@local"
+            .to_owned();
+        let case_insensitive = false;
+        let multi_line = true;
+        let dot_matches_new_line = false;
+
+        let regex = RegexBuilder::new(&pattern)
+            .case_insensitive(case_insensitive)
+            .multi_line(multi_line)
+            .dot_matches_new_line(dot_matches_new_line)
+            .build()
+            .ok();
+        let matches = collect_matches(regex.as_ref(), &test_text);
+
         Self {
-            pattern: r"\b\w+@\w+\.\w+\b".to_owned(),
-            test_text: "Send logs to dev@example.com and security@example.org.\nInvalid: dev@local"
-                .to_owned(),
-            case_insensitive: false,
-            multi_line: true,
-            dot_matches_new_line: false,
+            cached_pattern: pattern.clone(),
+            pattern,
+            cached_case_insensitive: case_insensitive,
+            case_insensitive,
+            cached_multi_line: multi_line,
+            multi_line,
+            cached_dot_matches_new_line: dot_matches_new_line,
+            dot_matches_new_line,
+            cached_test_text: test_text.clone(),
+            test_text,
+            cached_error: None,
+            cached_regex: regex,
+            cached_matches: matches,
         }
     }
 }
 
 impl RegexTool {
-    fn build_regex(&self) -> Result<Regex, regex::Error> {
-        RegexBuilder::new(&self.pattern)
-            .case_insensitive(self.case_insensitive)
-            .multi_line(self.multi_line)
-            .dot_matches_new_line(self.dot_matches_new_line)
-            .build()
+    fn refresh_cache(&mut self) {
+        let pattern_changed = self.pattern != self.cached_pattern
+            || self.case_insensitive != self.cached_case_insensitive
+            || self.multi_line != self.cached_multi_line
+            || self.dot_matches_new_line != self.cached_dot_matches_new_line;
+
+        if pattern_changed {
+            self.cached_pattern = self.pattern.clone();
+            self.cached_case_insensitive = self.case_insensitive;
+            self.cached_multi_line = self.multi_line;
+            self.cached_dot_matches_new_line = self.dot_matches_new_line;
+
+            match RegexBuilder::new(&self.pattern)
+                .case_insensitive(self.case_insensitive)
+                .multi_line(self.multi_line)
+                .dot_matches_new_line(self.dot_matches_new_line)
+                .build()
+            {
+                Ok(regex) => {
+                    self.cached_regex = Some(regex);
+                    self.cached_error = None;
+                }
+                Err(error) => {
+                    self.cached_regex = None;
+                    self.cached_error = Some(error.to_string());
+                }
+            }
+        }
+
+        if pattern_changed || self.test_text != self.cached_test_text {
+            self.cached_test_text = self.test_text.clone();
+            self.cached_matches = collect_matches(self.cached_regex.as_ref(), &self.test_text);
+        }
     }
 
     pub(crate) fn ui(&mut self, ui: &mut Ui) {
-        let result = self.build_regex();
+        self.refresh_cache();
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -59,21 +130,21 @@ impl RegexTool {
                         ui.checkbox(&mut self.dot_matches_new_line, "Dot matches newline");
                     });
 
-                    if let Err(error) = &result {
+                    if let Some(error) = &self.cached_error {
                         ui.add_space(8.0);
-                        ui.colored_label(ui.visuals().error_fg_color, error.to_string());
+                        ui.colored_label(ui.visuals().error_fg_color, error.as_str());
                     }
                 });
 
                 ui.add_space(14.0);
                 panel(ui, "Test Text", |ui| {
-                    let highlight_regex = result.as_ref().ok().cloned();
-                    let mut layouter = move |ui: &Ui, text: &dyn TextBuffer, wrap_width: f32| {
+                    let matches = &self.cached_matches;
+                    let mut layouter = |ui: &Ui, text: &dyn TextBuffer, wrap_width: f32| {
                         let font_id = TextStyle::Monospace.resolve(ui.style());
                         let visuals = ui.visuals();
                         let job = highlighted_text_job(
                             text.as_str(),
-                            highlight_regex.as_ref(),
+                            matches,
                             font_id,
                             visuals.text_color(),
                             visuals.dark_mode,
@@ -96,25 +167,25 @@ impl RegexTool {
             ui.add_space(14.0);
             ui.vertical(|ui| {
                 panel(ui, "Matches", |ui| {
-                    self.match_list(ui, result.as_ref().ok())
+                    self.match_list(ui)
                 });
             });
         });
     }
 
-    fn match_list(&self, ui: &mut Ui, regex: Option<&Regex>) {
-        let Some(regex) = regex else {
+    fn match_list(&self, ui: &mut Ui) {
+        if self.cached_regex.is_none() {
             ui.label(
                 RichText::new("Fix the pattern to see matches.")
                     .color(ui.visuals().weak_text_color()),
             );
             return;
-        };
+        }
 
-        let captures: Vec<_> = regex.captures_iter(&self.test_text).collect();
+        let matches = &self.cached_matches;
         ui.horizontal(|ui| {
-            ui.label(RichText::new(captures.len().to_string()).heading());
-            ui.label(if captures.len() == 1 {
+            ui.label(RichText::new(matches.len().to_string()).heading());
+            ui.label(if matches.len() == 1 {
                 "match found"
             } else {
                 "matches found"
@@ -122,7 +193,7 @@ impl RegexTool {
         });
         ui.separator();
 
-        if captures.is_empty() {
+        if matches.is_empty() {
             ui.label(RichText::new("No matches.").color(ui.visuals().weak_text_color()));
             return;
         }
@@ -130,11 +201,7 @@ impl RegexTool {
         ScrollArea::vertical()
             .auto_shrink([false, false])
             .show(ui, |ui| {
-                for (index, captures) in captures.iter().enumerate() {
-                    let Some(mat) = captures.get(0) else {
-                        continue;
-                    };
-
+                for (index, mat) in matches.iter().enumerate() {
                     Frame::group(ui.style())
                         .inner_margin(Margin::same(10))
                         .show(ui, |ui| {
@@ -142,52 +209,46 @@ impl RegexTool {
                                 ui.label(RichText::new(format!("#{}", index + 1)).strong());
                                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                     ui.label(
-                                        RichText::new(format!("{}..{}", mat.start(), mat.end()))
+                                        RichText::new(format!("{}..{}", mat.start, mat.end))
                                             .monospace()
                                             .color(ui.visuals().weak_text_color()),
                                     );
                                 });
                             });
                             ui.add_space(4.0);
-                            ui.label(RichText::new(mat.as_str()).monospace());
+                            ui.label(RichText::new(&mat.text).monospace());
 
-                            let groups: Vec<_> = captures
-                                .iter()
-                                .enumerate()
-                                .skip(1)
-                                .filter_map(|(group_index, group)| {
-                                    group.map(|group| (group_index, group))
-                                })
-                                .collect();
-
-                            if !groups.is_empty() {
+                            if !mat.groups.is_empty() {
                                 ui.add_space(8.0);
                                 ui.label(
                                     RichText::new(format!(
                                         "{} {}",
-                                        groups.len(),
-                                        if groups.len() == 1 { "group" } else { "groups" }
+                                        mat.groups.len(),
+                                        if mat.groups.len() == 1 {
+                                            "group"
+                                        } else {
+                                            "groups"
+                                        }
                                     ))
                                     .color(ui.visuals().weak_text_color()),
                                 );
 
-                                for (group_index, group) in groups {
+                                for group in &mat.groups {
                                     ui.horizontal(|ui| {
                                         ui.label(
-                                            RichText::new(format!("${group_index}"))
+                                            RichText::new(format!("${}", group.index))
                                                 .monospace()
-                                                .color(group_color(group_index)),
+                                                .color(group_color(group.index)),
                                         );
                                         ui.label(
                                             RichText::new(format!(
                                                 "{}..{}",
-                                                group.start(),
-                                                group.end()
+                                                group.start, group.end
                                             ))
                                             .monospace()
                                             .color(ui.visuals().weak_text_color()),
                                         );
-                                        ui.label(RichText::new(group.as_str()).monospace());
+                                        ui.label(RichText::new(&group.text).monospace());
                                     });
                                 }
                             }
@@ -198,6 +259,38 @@ impl RegexTool {
     }
 }
 
+fn collect_matches(regex: Option<&Regex>, text: &str) -> Vec<MatchInfo> {
+    let Some(regex) = regex else {
+        return Vec::new();
+    };
+    regex
+        .captures_iter(text)
+        .filter_map(|captures| {
+            let mat = captures.get(0)?;
+            let groups = captures
+                .iter()
+                .enumerate()
+                .skip(1)
+                .filter_map(|(i, g)| {
+                    let g = g?;
+                    Some(GroupInfo {
+                        index: i,
+                        text: g.as_str().to_owned(),
+                        start: g.start(),
+                        end: g.end(),
+                    })
+                })
+                .collect();
+            Some(MatchInfo {
+                text: mat.as_str().to_owned(),
+                start: mat.start(),
+                end: mat.end(),
+                groups,
+            })
+        })
+        .collect()
+}
+
 struct HighlightRange {
     range: Range<usize>,
     background: Color32,
@@ -206,7 +299,7 @@ struct HighlightRange {
 
 fn highlighted_text_job(
     text: &str,
-    regex: Option<&Regex>,
+    matches: &[MatchInfo],
     font_id: FontId,
     text_color: Color32,
     dark_mode: bool,
@@ -214,27 +307,20 @@ fn highlighted_text_job(
 ) -> LayoutJob {
     let mut ranges = Vec::new();
 
-    if let Some(regex) = regex {
-        for captures in regex.captures_iter(text) {
-            if let Some(mat) = captures.get(0) {
-                push_highlight(
-                    &mut ranges,
-                    mat.start()..mat.end(),
-                    match_background(dark_mode),
-                    1,
-                );
-            }
-
-            for (group_index, group) in captures.iter().enumerate().skip(1) {
-                if let Some(group) = group {
-                    push_highlight(
-                        &mut ranges,
-                        group.start()..group.end(),
-                        group_background(group_index, dark_mode),
-                        10 + group_index,
-                    );
-                }
-            }
+    for mat in matches {
+        push_highlight(
+            &mut ranges,
+            mat.start..mat.end,
+            match_background(dark_mode),
+            1,
+        );
+        for group in &mat.groups {
+            push_highlight(
+                &mut ranges,
+                group.start..group.end,
+                group_background(group.index, dark_mode),
+                10 + group.index,
+            );
         }
     }
 

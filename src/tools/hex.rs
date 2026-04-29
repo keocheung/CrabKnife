@@ -9,21 +9,38 @@ use crate::ui::panel;
 pub(crate) struct HexTool {
     hex_text: String,
     encoding: TextEncoding,
+    cached_hex: String,
+    cached_encoding: TextEncoding,
+    decoded_text: String,
+    decoded_byte_count: usize,
 }
 
 impl Default for HexTool {
     fn default() -> Self {
+        let hex_text = "48656c6c6f2c20527573744b6e69666521".to_owned();
+        let bytes = hex_to_bytes(&hex_text);
+        let decoded_byte_count = bytes.len();
+        let decoded_text = decode_bytes(&bytes, TextEncoding::Utf8);
         Self {
-            hex_text: "48656c6c6f2c20527573744b6e69666521".to_owned(),
+            cached_hex: hex_text.clone(),
+            hex_text,
             encoding: TextEncoding::Utf8,
+            cached_encoding: TextEncoding::Utf8,
+            decoded_text,
+            decoded_byte_count,
         }
     }
 }
 
 impl HexTool {
     pub(crate) fn ui(&mut self, ui: &mut Ui) {
-        let bytes = hex_to_bytes(&self.hex_text);
-        let mut decoded_text = decode_bytes(&bytes, self.encoding);
+        if self.hex_text != self.cached_hex || self.encoding != self.cached_encoding {
+            let bytes = hex_to_bytes(&self.hex_text);
+            self.decoded_byte_count = bytes.len();
+            self.decoded_text = decode_bytes(&bytes, self.encoding);
+            self.cached_hex = self.hex_text.clone();
+            self.cached_encoding = self.encoding;
+        }
 
         ui.horizontal(|ui| {
             ui.vertical(|ui| {
@@ -41,8 +58,8 @@ impl HexTool {
                     ui.label(
                         RichText::new(format!(
                             "{} byte{} decoded. Non-hex characters are ignored.",
-                            bytes.len(),
-                            if bytes.len() == 1 { "" } else { "s" }
+                            self.decoded_byte_count,
+                            if self.decoded_byte_count == 1 { "" } else { "s" }
                         ))
                         .color(ui.visuals().weak_text_color()),
                     );
@@ -51,11 +68,10 @@ impl HexTool {
                 ui.add_space(14.0);
                 panel(ui, "String", |ui| {
                     ui.add(
-                        TextEdit::multiline(&mut decoded_text)
+                        TextEdit::multiline(&mut self.decoded_text)
                             .font(TextStyle::Monospace)
                             .desired_rows(12)
-                            .desired_width(f32::INFINITY)
-                            .interactive(false),
+                            .desired_width(f32::INFINITY),
                     );
                 });
             });

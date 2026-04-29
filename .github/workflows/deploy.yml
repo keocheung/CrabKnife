@@ -25,11 +25,9 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install trunk
-        run: cargo install trunk --locked
-
-      - name: Build
-        run: trunk build --release
+      - uses: trunk-rs/trunk-action@v1
+        with:
+          args: build --release
 
       - uses: actions/upload-pages-artifact@v3
         with:

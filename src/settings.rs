@@ -444,7 +444,7 @@ impl Settings {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn load_config_string() -> Option<String> {
-        let path = config_path().or_else(legacy_config_path)?;
+        let path = config_path()?;
         std::fs::read_to_string(path).ok()
     }
 
@@ -574,30 +574,26 @@ fn config_path() -> Option<PathBuf> {
             .map(|path| path.join("CrabKnife").join("config.toml"))
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "linux")]
     {
-        std::env::var_os("HOME")
+        std::env::var_os("XDG_CONFIG_HOME")
             .map(PathBuf::from)
-            .map(|path| path.join(".config").join("CrabKnife").join("config.toml"))
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn legacy_config_path() -> Option<PathBuf> {
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .map(|path| path.join("RustKnife").join("config.toml"))
-            .filter(|path| path.exists())
+            .or_else(|| {
+                std::env::var_os("HOME")
+                    .map(PathBuf::from)
+                    .map(|path| path.join(".config"))
+            })
+            .map(|path| path.join("CrabKnife").join("config.toml"))
     }
 
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(target_os = "macos")]
     {
-        std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .map(|path| path.join(".config").join("RustKnife").join("config.toml"))
-            .filter(|path| path.exists())
+        std::env::var_os("HOME").map(PathBuf::from).map(|path| {
+            path.join("Library")
+                .join("Application Support")
+                .join("CrabKnife")
+                .join("config.toml")
+        })
     }
 }
 
@@ -777,9 +773,12 @@ fn font_picker(
             changed |= ui
                 .selectable_value(selected_font, FontChoice::Monospace, "Monospace")
                 .changed();
-            changed |= ui
-                .selectable_value(selected_font, FontChoice::Custom, "Custom font file")
-                .changed();
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                changed |= ui
+                    .selectable_value(selected_font, FontChoice::Custom, "Custom font file")
+                    .changed();
+            }
 
             ui.separator();
             ScrollArea::vertical().max_height(260.0).show(ui, |ui| {

@@ -1,6 +1,8 @@
+#[cfg(any(test, not(target_arch = "wasm32")))]
 use std::io::Cursor;
 
 use eframe::egui::{self, Color32, RichText, ScrollArea, Sense, TextEdit, TextStyle, Ui, Vec2};
+#[cfg(any(test, not(target_arch = "wasm32")))]
 use image::{DynamicImage, ImageBuffer, ImageFormat, Luma};
 use qrcode::{Color, EcLevel, QrCode};
 
@@ -278,6 +280,7 @@ fn export_button(ui: &mut Ui, tool: &mut QrTool) {
     }
 }
 
+#[cfg(any(test, not(target_arch = "wasm32")))]
 fn qr_png_bytes(
     code: &QrCode,
     module_pixels: u32,

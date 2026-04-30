@@ -5,7 +5,32 @@ use md5::Md5;
 use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha384, Sha512};
 
+#[cfg(target_arch = "wasm32")]
+use std::{cell::Cell, rc::Rc, sync::mpsc};
+#[cfg(not(target_arch = "wasm32"))]
+use std::{
+    fs::File,
+    io::{BufReader, Read},
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+        mpsc,
+    },
+};
+
+#[cfg(target_arch = "wasm32")]
+use wasm_bindgen_futures::JsFuture;
+
 use crate::ui::panel;
+
+const HASHING_CANCELED: &str = "Hashing canceled.";
+#[cfg(not(target_arch = "wasm32"))]
+const NATIVE_HASH_CHUNK_SIZE: usize = 64 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const NATIVE_BLAKE3_HASH_CHUNK_SIZE: usize = 1024 * 1024;
+#[cfg(target_arch = "wasm32")]
+const WASM_HASH_CHUNK_SIZE: u64 = 1024 * 1024;
 
 pub(crate) struct HashTool {
     algorithm: HashAlgorithm,
@@ -13,7 +38,15 @@ pub(crate) struct HashTool {
     output_text: String,
     compare_text: String,
     selected_file_path: Option<String>,
-    selected_file_bytes: Vec<u8>,
+    #[cfg(not(target_arch = "wasm32"))]
+    selected_file_fs_path: Option<PathBuf>,
+    #[cfg(target_arch = "wasm32")]
+    selected_web_file: Option<rfd::FileHandle>,
+    selected_file_size: Option<u64>,
+    hash_receiver: Option<mpsc::Receiver<HashWorkerMessage>>,
+    hash_progress: Option<HashProgress>,
+    hash_in_progress: bool,
+    hash_cancel_flag: Option<HashCancelFlag>,
     selected_file_revision: u64,
     file_error: Option<String>,
     #[cfg(target_arch = "wasm32")]
@@ -36,7 +69,15 @@ impl Default for HashTool {
             output_text,
             compare_text: String::new(),
             selected_file_path: None,
-            selected_file_bytes: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            selected_file_fs_path: None,
+            #[cfg(target_arch = "wasm32")]
+            selected_web_file: None,
+            selected_file_size: None,
+            hash_receiver: None,
+            hash_progress: None,
+            hash_in_progress: false,
+            hash_cancel_flag: None,
             selected_file_revision: 0,
             file_error: None,
             #[cfg(target_arch = "wasm32")]
@@ -51,8 +92,13 @@ impl Default for HashTool {
 
 impl HashTool {
     pub(crate) fn ui(&mut self, ui: &mut Ui) {
+        self.poll_hash_progress();
         self.poll_file_selection();
         self.refresh_output();
+
+        if self.hash_in_progress {
+            ui.ctx().request_repaint();
+        }
 
         ScrollArea::vertical()
             .auto_shrink([false, false])
@@ -63,7 +109,9 @@ impl HashTool {
                         ui.set_min_width(ui.available_width());
                         ui.horizontal(|ui| {
                             ui.label("Algorithm");
-                            algorithm_picker(ui, &mut self.algorithm);
+                            ui.add_enabled_ui(!self.hash_in_progress, |ui| {
+                                algorithm_picker(ui, &mut self.algorithm);
+                            });
                         });
                     });
 
@@ -102,18 +150,43 @@ impl HashTool {
                     );
                     ui.add_space(8.0);
                     ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "{} byte(s) hashed from {} with {}.",
-                                self.input_byte_count(),
-                                self.input_source_label(),
-                                self.algorithm.label()
-                            ))
-                            .color(ui.visuals().weak_text_color()),
-                        );
+                        if let Some(progress) = self.hash_progress {
+                            let bar = if progress.total_bytes > 0 {
+                                egui::ProgressBar::new(
+                                    progress.processed_bytes as f32 / progress.total_bytes as f32,
+                                )
+                            } else {
+                                egui::ProgressBar::new(0.0).animate(true)
+                            };
+                            let progress_width = (ui.available_width() * 0.5).max(220.0);
+                            ui.add_sized(
+                                [progress_width, ui.spacing().interact_size.y],
+                                bar.show_percentage().text(format!(
+                                    "Hashing file: {} / {} byte(s)",
+                                    progress.processed_bytes, progress.total_bytes
+                                )),
+                            );
+                        } else {
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} byte(s) hashed from {} with {}.",
+                                    self.input_byte_count(),
+                                    self.input_source_label(),
+                                    self.algorithm.label()
+                                ))
+                                .color(ui.visuals().weak_text_color()),
+                            );
+                        }
+
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            if ui.button("Copy").clicked() {
+                            if ui
+                                .add_enabled(!self.hash_in_progress, egui::Button::new("Copy"))
+                                .clicked()
+                            {
                                 ui.copy_text(self.output_text.clone());
+                            }
+                            if self.hash_in_progress && ui.button("Cancel").clicked() {
+                                self.cancel_file_hash();
                             }
                         });
                     });
@@ -150,18 +223,23 @@ impl HashTool {
     fn refresh_output(&mut self) {
         let input = self.current_input();
         if self.algorithm != self.cached_algorithm || input != self.cached_input {
-            self.output_text = match input {
-                CachedInput::Text(_) => hash_bytes(self.algorithm, self.input_text.as_bytes()),
-                CachedInput::File(..) => hash_bytes(self.algorithm, &self.selected_file_bytes),
-            };
+            match input {
+                CachedInput::Text(_) => {
+                    self.output_text = hash_bytes(self.algorithm, self.input_text.as_bytes());
+                    self.cancel_file_hash();
+                }
+                CachedInput::File(_) => {
+                    self.start_file_hash();
+                }
+            }
             self.cached_algorithm = self.algorithm;
             self.cached_input = input;
         }
     }
 
     fn current_input(&self) -> CachedInput {
-        if self.selected_file_path.is_some() && self.file_error.is_none() {
-            CachedInput::File(self.selected_file_bytes.len(), self.selected_file_revision)
+        if self.selected_file_path.is_some() {
+            CachedInput::File(self.selected_file_revision)
         } else {
             CachedInput::Text(self.input_text.clone())
         }
@@ -170,7 +248,7 @@ impl HashTool {
     fn input_byte_count(&self) -> usize {
         match self.current_input() {
             CachedInput::Text(_) => self.input_text.len(),
-            CachedInput::File(..) => self.selected_file_bytes.len(),
+            CachedInput::File(_) => self.selected_file_byte_count(),
         }
     }
 
@@ -183,7 +261,16 @@ impl HashTool {
 
     fn clear_file(&mut self) {
         self.selected_file_path = None;
-        self.selected_file_bytes.clear();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.selected_file_fs_path = None;
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.selected_web_file = None;
+        }
+        self.selected_file_size = None;
+        self.cancel_file_hash();
         self.selected_file_revision = self.selected_file_revision.wrapping_add(1);
         self.file_error = None;
         #[cfg(target_arch = "wasm32")]
@@ -193,27 +280,103 @@ impl HashTool {
         }
     }
 
+    fn cancel_file_hash(&mut self) {
+        if let Some(cancel_flag) = &self.hash_cancel_flag {
+            cancel_flag.cancel();
+        }
+        self.hash_receiver = None;
+        self.hash_progress = None;
+        self.hash_in_progress = false;
+        self.hash_cancel_flag = None;
+    }
+
+    fn poll_hash_progress(&mut self) {
+        let Some(receiver) = self.hash_receiver.take() else {
+            return;
+        };
+
+        let mut keep_receiver = true;
+        while let Ok(message) = receiver.try_recv() {
+            match message {
+                HashWorkerMessage::Progress(progress) => {
+                    self.hash_progress = Some(progress);
+                }
+                HashWorkerMessage::Finished(result) => {
+                    self.hash_in_progress = false;
+                    self.hash_progress = None;
+                    self.hash_cancel_flag = None;
+                    match result {
+                        Ok(output) => {
+                            self.output_text = output;
+                            self.file_error = None;
+                        }
+                        Err(error) => {
+                            self.output_text.clear();
+                            self.file_error = if error == HASHING_CANCELED {
+                                None
+                            } else {
+                                Some(error)
+                            };
+                        }
+                    }
+                    keep_receiver = false;
+                    break;
+                }
+            }
+        }
+
+        if keep_receiver {
+            self.hash_receiver = Some(receiver);
+        }
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn select_file(&mut self) {
         let Some(path) = rfd::FileDialog::new().pick_file() else {
             return;
         };
 
-        let display_path = path.display().to_string();
-        match std::fs::read(&path) {
-            Ok(bytes) => {
-                self.selected_file_path = Some(display_path);
-                self.selected_file_bytes = bytes;
-                self.selected_file_revision = self.selected_file_revision.wrapping_add(1);
-                self.file_error = None;
-            }
-            Err(error) => {
-                self.selected_file_path = Some(display_path);
-                self.selected_file_bytes.clear();
-                self.selected_file_revision = self.selected_file_revision.wrapping_add(1);
-                self.file_error = Some(format!("Could not read file: {error}"));
-            }
-        }
+        self.cancel_file_hash();
+        self.selected_file_path = Some(path.display().to_string());
+        self.selected_file_size = std::fs::metadata(&path).ok().map(|metadata| metadata.len());
+        self.selected_file_fs_path = Some(path);
+        self.selected_file_revision = self.selected_file_revision.wrapping_add(1);
+        self.file_error = None;
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn start_file_hash(&mut self) {
+        let Some(path) = self.selected_file_fs_path.clone() else {
+            self.output_text.clear();
+            self.file_error = Some("Selected file is not available.".to_owned());
+            return;
+        };
+
+        self.cancel_file_hash();
+        let (sender, receiver) = mpsc::channel();
+        let algorithm = self.algorithm;
+        let cancel_flag = HashCancelFlag::new();
+        self.output_text.clear();
+        self.file_error = None;
+        self.hash_progress = None;
+        self.hash_in_progress = true;
+        self.hash_receiver = Some(receiver);
+        self.hash_cancel_flag = Some(cancel_flag.clone());
+
+        std::thread::spawn(move || {
+            let result = hash_file(&path, algorithm, &sender, &cancel_flag);
+            let _ = sender.send(HashWorkerMessage::Finished(result));
+        });
+    }
+
+    fn selected_file_byte_count(&self) -> usize {
+        self.selected_file_size
+            .unwrap_or(
+                self.hash_progress
+                    .map_or(0, |progress| progress.total_bytes),
+            )
+            .try_into()
+            .unwrap_or(usize::MAX)
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -222,6 +385,7 @@ impl HashTool {
             return;
         }
 
+        self.cancel_file_hash();
         let (sender, receiver) = std::sync::mpsc::channel();
         self.file_receiver = Some(receiver);
         self.file_picker_pending = true;
@@ -229,16 +393,41 @@ impl HashTool {
 
         wasm_bindgen_futures::spawn_local(async move {
             let selection = match rfd::AsyncFileDialog::new().pick_file().await {
-                Some(file) => {
-                    let file_name = file.file_name();
-                    let bytes = file.read().await;
-                    WebFileSelection::Selected { file_name, bytes }
-                }
+                Some(file) => WebFileSelection::Selected {
+                    file_name: file.file_name(),
+                    file_size: file.inner().size() as u64,
+                    file,
+                },
                 None => WebFileSelection::Canceled,
             };
 
             let _ = sender.send(selection);
             ctx.request_repaint();
+        });
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn start_file_hash(&mut self) {
+        let Some(file_handle) = self.selected_web_file.clone() else {
+            self.output_text.clear();
+            self.file_error = Some("Selected file is not available.".to_owned());
+            return;
+        };
+
+        self.cancel_file_hash();
+        let (sender, receiver) = mpsc::channel();
+        let algorithm = self.algorithm;
+        let cancel_flag = HashCancelFlag::new();
+        self.output_text.clear();
+        self.file_error = None;
+        self.hash_progress = None;
+        self.hash_in_progress = true;
+        self.hash_receiver = Some(receiver);
+        self.hash_cancel_flag = Some(cancel_flag.clone());
+
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = hash_file(&file_handle, algorithm, &sender, &cancel_flag).await;
+            let _ = sender.send(HashWorkerMessage::Finished(result));
         });
     }
 
@@ -252,9 +441,14 @@ impl HashTool {
         };
 
         match receiver.try_recv() {
-            Ok(WebFileSelection::Selected { file_name, bytes }) => {
+            Ok(WebFileSelection::Selected {
+                file_name,
+                file_size,
+                file,
+            }) => {
                 self.selected_file_path = Some(file_name);
-                self.selected_file_bytes = bytes;
+                self.selected_web_file = Some(file);
+                self.selected_file_size = Some(file_size);
                 self.selected_file_revision = self.selected_file_revision.wrapping_add(1);
                 self.file_error = None;
                 self.file_picker_pending = false;
@@ -275,14 +469,66 @@ impl HashTool {
 
 #[cfg(target_arch = "wasm32")]
 enum WebFileSelection {
-    Selected { file_name: String, bytes: Vec<u8> },
+    Selected {
+        file_name: String,
+        file_size: u64,
+        file: rfd::FileHandle,
+    },
     Canceled,
 }
 
 #[derive(Clone, PartialEq, Eq)]
 enum CachedInput {
     Text(String),
-    File(usize, u64),
+    File(u64),
+}
+
+#[derive(Clone, Copy)]
+struct HashProgress {
+    processed_bytes: u64,
+    total_bytes: u64,
+}
+
+enum HashWorkerMessage {
+    Progress(HashProgress),
+    Finished(Result<String, String>),
+}
+
+#[derive(Clone)]
+struct HashCancelFlag {
+    #[cfg(not(target_arch = "wasm32"))]
+    inner: Arc<AtomicBool>,
+    #[cfg(target_arch = "wasm32")]
+    inner: Rc<Cell<bool>>,
+}
+
+impl HashCancelFlag {
+    fn new() -> Self {
+        Self {
+            #[cfg(not(target_arch = "wasm32"))]
+            inner: Arc::new(AtomicBool::new(false)),
+            #[cfg(target_arch = "wasm32")]
+            inner: Rc::new(Cell::new(false)),
+        }
+    }
+
+    fn cancel(&self) {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.inner.store(true, Ordering::Relaxed);
+        #[cfg(target_arch = "wasm32")]
+        self.inner.set(true);
+    }
+
+    fn is_canceled(&self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            self.inner.load(Ordering::Relaxed)
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.inner.get()
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -357,7 +603,7 @@ fn file_picker(ui: &mut Ui, tool: &mut HashTool) {
         ui.label(RichText::new(path).monospace());
         if tool.file_error.is_none() {
             ui.label(
-                RichText::new(format!("{} byte(s)", tool.selected_file_bytes.len()))
+                RichText::new(format!("{} byte(s)", tool.selected_file_byte_count()))
                     .color(ui.visuals().weak_text_color()),
             );
         }
@@ -383,6 +629,149 @@ fn hash_bytes(algorithm: HashAlgorithm, bytes: &[u8]) -> String {
         HashAlgorithm::Sha512 => digest_to_hex(Sha512::digest(bytes)),
         HashAlgorithm::Blake3 => blake3::hash(bytes).to_hex().to_string(),
         HashAlgorithm::Crc32 => format!("{:08x}", crc32fast::hash(bytes)),
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn native_hash_chunk_size(algorithm: HashAlgorithm) -> usize {
+    match algorithm {
+        HashAlgorithm::Blake3 => NATIVE_BLAKE3_HASH_CHUNK_SIZE,
+        _ => NATIVE_HASH_CHUNK_SIZE,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn hash_file(
+    path: &std::path::Path,
+    algorithm: HashAlgorithm,
+    sender: &mpsc::Sender<HashWorkerMessage>,
+    cancel_flag: &HashCancelFlag,
+) -> Result<String, String> {
+    let file = File::open(path).map_err(|error| format!("Could not read file: {error}"))?;
+    let total_bytes = file.metadata().map(|metadata| metadata.len()).unwrap_or(0);
+    let mut reader = BufReader::new(file);
+    let mut hasher = StreamingHasher::new(algorithm);
+    let mut processed_bytes = 0_u64;
+    let mut buffer = vec![0_u8; native_hash_chunk_size(algorithm)];
+
+    loop {
+        if cancel_flag.is_canceled() {
+            return Err(HASHING_CANCELED.to_owned());
+        }
+
+        let read = reader
+            .read(&mut buffer)
+            .map_err(|error| format!("Could not read file: {error}"))?;
+        if read == 0 {
+            break;
+        }
+
+        hasher.update_native_file_chunk(&buffer[..read]);
+        processed_bytes += read as u64;
+        let _ = sender.send(HashWorkerMessage::Progress(HashProgress {
+            processed_bytes,
+            total_bytes,
+        }));
+    }
+
+    Ok(hasher.finalize())
+}
+
+#[cfg(target_arch = "wasm32")]
+async fn hash_file(
+    file_handle: &rfd::FileHandle,
+    algorithm: HashAlgorithm,
+    sender: &mpsc::Sender<HashWorkerMessage>,
+    cancel_flag: &HashCancelFlag,
+) -> Result<String, String> {
+    let file = file_handle.inner().clone();
+    let total_bytes = file.size() as u64;
+    let mut hasher = StreamingHasher::new(algorithm);
+    let mut processed_bytes = 0_u64;
+    let chunk_size = WASM_HASH_CHUNK_SIZE;
+
+    while processed_bytes < total_bytes {
+        if cancel_flag.is_canceled() {
+            return Err(HASHING_CANCELED.to_owned());
+        }
+
+        let end = (processed_bytes + chunk_size).min(total_bytes);
+        let chunk = file
+            .slice_with_f64_and_f64(processed_bytes as f64, end as f64)
+            .map_err(|error| format!("Could not read file: {error:?}"))?;
+        let bytes = JsFuture::from(chunk.array_buffer())
+            .await
+            .map_err(|error| format!("Could not read file: {error:?}"))?;
+        let buffer = js_sys::Uint8Array::new(&bytes).to_vec();
+
+        hasher.update(&buffer);
+        processed_bytes = end;
+        let _ = sender.send(HashWorkerMessage::Progress(HashProgress {
+            processed_bytes,
+            total_bytes,
+        }));
+    }
+
+    Ok(hasher.finalize())
+}
+
+enum StreamingHasher {
+    Md5(Md5),
+    Sha1(Sha1),
+    Sha256(Sha256),
+    Sha384(Sha384),
+    Sha512(Sha512),
+    Blake3(blake3::Hasher),
+    Crc32(crc32fast::Hasher),
+}
+
+impl StreamingHasher {
+    fn new(algorithm: HashAlgorithm) -> Self {
+        match algorithm {
+            HashAlgorithm::Md5 => Self::Md5(Md5::new()),
+            HashAlgorithm::Sha1 => Self::Sha1(Sha1::new()),
+            HashAlgorithm::Sha256 => Self::Sha256(Sha256::new()),
+            HashAlgorithm::Sha384 => Self::Sha384(Sha384::new()),
+            HashAlgorithm::Sha512 => Self::Sha512(Sha512::new()),
+            HashAlgorithm::Blake3 => Self::Blake3(blake3::Hasher::new()),
+            HashAlgorithm::Crc32 => Self::Crc32(crc32fast::Hasher::new()),
+        }
+    }
+
+    fn update(&mut self, bytes: &[u8]) {
+        match self {
+            Self::Md5(hasher) => hasher.update(bytes),
+            Self::Sha1(hasher) => hasher.update(bytes),
+            Self::Sha256(hasher) => hasher.update(bytes),
+            Self::Sha384(hasher) => hasher.update(bytes),
+            Self::Sha512(hasher) => hasher.update(bytes),
+            Self::Blake3(hasher) => {
+                hasher.update(bytes);
+            }
+            Self::Crc32(hasher) => hasher.update(bytes),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn update_native_file_chunk(&mut self, bytes: &[u8]) {
+        match self {
+            Self::Blake3(hasher) => {
+                hasher.update_rayon(bytes);
+            }
+            _ => self.update(bytes),
+        }
+    }
+
+    fn finalize(self) -> String {
+        match self {
+            Self::Md5(hasher) => digest_to_hex(hasher.finalize()),
+            Self::Sha1(hasher) => digest_to_hex(hasher.finalize()),
+            Self::Sha256(hasher) => digest_to_hex(hasher.finalize()),
+            Self::Sha384(hasher) => digest_to_hex(hasher.finalize()),
+            Self::Sha512(hasher) => digest_to_hex(hasher.finalize()),
+            Self::Blake3(hasher) => hasher.finalize().to_hex().to_string(),
+            Self::Crc32(hasher) => format!("{:08x}", hasher.finalize()),
+        }
     }
 }
 

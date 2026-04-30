@@ -149,9 +149,6 @@ impl CrabKnifeApp {
                 Tool::QrCode => "QR Code",
                 Tool::Settings => "Settings",
             });
-            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                ui.label(RichText::new("English").color(ui.visuals().weak_text_color()));
-            });
         });
     }
 }

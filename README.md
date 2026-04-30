@@ -1,7 +1,7 @@
 # CrabKnife
 
 CrabKnife is a small desktop developer toolbox written in Rust with `egui`,
-while keeping the interface close to native egui styling.
+runs natively and on web.
 
 ## Features
 
@@ -28,8 +28,3 @@ cargo fmt --check
 cargo check
 cargo test
 ```
-
-## Notes
-
-The app is English-only for now. Future tools should be added as separate state
-and UI sections under the existing egui application structure.

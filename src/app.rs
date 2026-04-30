@@ -130,7 +130,7 @@ impl CrabKnifeApp {
             "Hex to String",
         );
         nav_button(ui, &mut self.active_tool, Tool::Base64, "64", "Base64");
-        nav_button(ui, &mut self.active_tool, Tool::Hash, "#", "Hash");
+        nav_button(ui, &mut self.active_tool, Tool::Hash, "#", "Hash / Checksum");
         nav_button(ui, &mut self.active_tool, Tool::QrCode, "QR", "QR Code");
         nav_button(ui, &mut self.active_tool, Tool::Settings, "Aa", "Settings");
 

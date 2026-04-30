@@ -13,8 +13,8 @@ md-5 = "0.10.6"
 qrcode = "0.14.1"
 regex = "1"
 rfd = { version = "0.15.4", features = ["file-handle-inner"] }
-sha1 = "0.10.6"
-sha2 = "0.10.9"
+sha1 = { version = "0.10.6", features = ["asm"] }
+sha2 = { version = "0.10.9", features = ["asm"] }
 toml_edit = "0.25.11"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -27,3 +27,12 @@ js-sys = "0.3"
 wasm-bindgen = "0.2"
 wasm-bindgen-futures = "0.4"
 web-sys = { version = "0.3", features = ["Blob", "Document", "File", "HtmlCanvasElement", "Storage", "Window"] }
+
+[profile.dev.package.sha1]
+opt-level = 3
+
+[profile.dev.package.sha2]
+opt-level = 3
+
+[profile.dev.package.md-5]
+opt-level = 3

@@ -4,6 +4,7 @@ use eframe::egui::{
 use md5::Md5;
 use sha1::Sha1;
 use sha2::{Digest, Sha256, Sha384, Sha512};
+use std::time::{Duration, Instant};
 
 #[cfg(target_arch = "wasm32")]
 use std::{cell::Cell, rc::Rc, sync::mpsc};
@@ -26,7 +27,7 @@ use crate::ui::panel;
 
 const HASHING_CANCELED: &str = "Hashing canceled.";
 #[cfg(not(target_arch = "wasm32"))]
-const NATIVE_HASH_CHUNK_SIZE: usize = 64 * 1024;
+const NATIVE_HASH_CHUNK_SIZE: usize = 1024 * 1024;
 #[cfg(not(target_arch = "wasm32"))]
 const NATIVE_BLAKE3_HASH_CHUNK_SIZE: usize = 1024 * 1024;
 #[cfg(target_arch = "wasm32")]
@@ -47,6 +48,8 @@ pub(crate) struct HashTool {
     hash_progress: Option<HashProgress>,
     hash_in_progress: bool,
     hash_cancel_flag: Option<HashCancelFlag>,
+    hash_started_at: Option<Instant>,
+    output_duration: Option<Duration>,
     selected_file_revision: u64,
     file_error: Option<String>,
     #[cfg(target_arch = "wasm32")]
@@ -78,6 +81,8 @@ impl Default for HashTool {
             hash_progress: None,
             hash_in_progress: false,
             hash_cancel_flag: None,
+            hash_started_at: None,
+            output_duration: None,
             selected_file_revision: 0,
             file_error: None,
             #[cfg(target_arch = "wasm32")]
@@ -162,17 +167,24 @@ impl HashTool {
                             ui.add_sized(
                                 [progress_width, ui.spacing().interact_size.y],
                                 bar.show_percentage().text(format!(
-                                    "Hashing file: {} / {} byte(s)",
-                                    progress.processed_bytes, progress.total_bytes
+                                    "Hashing file: {} / {}",
+                                    format_byte_count(progress.processed_bytes),
+                                    format_byte_count(progress.total_bytes)
                                 )),
                             );
                         } else {
                             ui.label(
                                 RichText::new(format!(
-                                    "{} byte(s) hashed from {} with {}.",
-                                    self.input_byte_count(),
+                                    "{} hashed from {} with {}{}.",
+                                    format_byte_count(self.input_byte_count() as u64),
                                     self.input_source_label(),
-                                    self.algorithm.label()
+                                    self.algorithm.label(),
+                                    self.output_duration
+                                        .map(|duration| format!(
+                                            " in {}",
+                                            format_duration(duration)
+                                        ))
+                                        .unwrap_or_default()
                                 ))
                                 .color(ui.visuals().weak_text_color()),
                             );
@@ -225,8 +237,10 @@ impl HashTool {
         if self.algorithm != self.cached_algorithm || input != self.cached_input {
             match input {
                 CachedInput::Text(_) => {
-                    self.output_text = hash_bytes(self.algorithm, self.input_text.as_bytes());
                     self.cancel_file_hash();
+                    let started_at = Instant::now();
+                    self.output_text = hash_bytes(self.algorithm, self.input_text.as_bytes());
+                    self.output_duration = Some(started_at.elapsed());
                 }
                 CachedInput::File(_) => {
                     self.start_file_hash();
@@ -288,6 +302,7 @@ impl HashTool {
         self.hash_progress = None;
         self.hash_in_progress = false;
         self.hash_cancel_flag = None;
+        self.hash_started_at = None;
     }
 
     fn poll_hash_progress(&mut self) {
@@ -305,6 +320,10 @@ impl HashTool {
                     self.hash_in_progress = false;
                     self.hash_progress = None;
                     self.hash_cancel_flag = None;
+                    self.output_duration = self
+                        .hash_started_at
+                        .take()
+                        .map(|started_at| started_at.elapsed());
                     match result {
                         Ok(output) => {
                             self.output_text = output;
@@ -312,6 +331,7 @@ impl HashTool {
                         }
                         Err(error) => {
                             self.output_text.clear();
+                            self.output_duration = None;
                             self.file_error = if error == HASHING_CANCELED {
                                 None
                             } else {
@@ -362,6 +382,8 @@ impl HashTool {
         self.hash_in_progress = true;
         self.hash_receiver = Some(receiver);
         self.hash_cancel_flag = Some(cancel_flag.clone());
+        self.hash_started_at = Some(Instant::now());
+        self.output_duration = None;
 
         std::thread::spawn(move || {
             let result = hash_file(&path, algorithm, &sender, &cancel_flag);
@@ -424,6 +446,8 @@ impl HashTool {
         self.hash_in_progress = true;
         self.hash_receiver = Some(receiver);
         self.hash_cancel_flag = Some(cancel_flag.clone());
+        self.hash_started_at = Some(Instant::now());
+        self.output_duration = None;
 
         wasm_bindgen_futures::spawn_local(async move {
             let result = hash_file(&file_handle, algorithm, &sender, &cancel_flag).await;
@@ -788,6 +812,41 @@ fn digest_to_hex(digest: impl AsRef<[u8]>) -> String {
     output
 }
 
+fn format_byte_count(byte_count: u64) -> String {
+    const UNITS: [&str; 6] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+    let mut value = byte_count as f64;
+    let mut unit_index = 0;
+
+    while value >= 1024.0 && unit_index < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit_index += 1;
+    }
+
+    if unit_index == 0 {
+        format!("{byte_count} B")
+    } else if value >= 100.0 {
+        format!("{value:.0} {}", UNITS[unit_index])
+    } else if value >= 10.0 {
+        format!("{value:.1} {}", UNITS[unit_index])
+    } else {
+        format!("{value:.2} {}", UNITS[unit_index])
+    }
+}
+
+fn format_duration(duration: Duration) -> String {
+    let seconds = duration.as_secs_f64();
+
+    if seconds < 0.001 {
+        format!("{:.0} us", seconds * 1_000_000.0)
+    } else if seconds < 1.0 {
+        format!("{:.1} ms", seconds * 1_000.0)
+    } else if seconds < 10.0 {
+        format!("{seconds:.2} s")
+    } else {
+        format!("{seconds:.1} s")
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CompareResult {
     Empty,
@@ -846,6 +905,22 @@ mod tests {
     #[test]
     fn hashes_with_crc32() {
         assert_eq!(hash_bytes(HashAlgorithm::Crc32, b"abc"), "352441c2");
+    }
+
+    #[test]
+    fn formats_byte_counts_for_display() {
+        assert_eq!(format_byte_count(512), "512 B");
+        assert_eq!(format_byte_count(1024), "1.00 KiB");
+        assert_eq!(format_byte_count(10 * 1024 * 1024), "10.0 MiB");
+        assert_eq!(format_byte_count(1024 * 1024 * 1024), "1.00 GiB");
+    }
+
+    #[test]
+    fn formats_durations_for_display() {
+        assert_eq!(format_duration(Duration::from_micros(500)), "500 us");
+        assert_eq!(format_duration(Duration::from_millis(25)), "25.0 ms");
+        assert_eq!(format_duration(Duration::from_millis(1500)), "1.50 s");
+        assert_eq!(format_duration(Duration::from_secs(12)), "12.0 s");
     }
 
     #[test]

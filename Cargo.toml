@@ -37,3 +37,8 @@ opt-level = 3
 
 [profile.dev.package.md-5]
 opt-level = 3
+
+[package.metadata.packager]
+productName = "CrabKnife"
+identifier = "moe.keo.crabknife"
+before-packaging-command = "cargo build --release"

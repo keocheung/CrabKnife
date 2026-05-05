@@ -65,7 +65,7 @@ impl FontVariationCoord {
     }
 
     fn is_valid_tag(&self) -> bool {
-        self.tag.len() == 4 && self.tag.bytes().all(|byte| byte.is_ascii_alphanumeric())
+        is_valid_font_tag(&self.tag)
     }
 }
 
@@ -479,86 +479,95 @@ impl Settings {
     pub(crate) fn ui(&mut self, ui: &mut Ui) -> bool {
         let mut changed = false;
 
-        panel(ui, "Appearance", |ui| {
-            changed |= font_picker(
-                ui,
-                "UI font",
-                "ui-font-family",
-                &mut self.ui_font,
-                &self.system_fonts,
-            );
+        ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                panel(ui, "About", |ui| {
+                    ui.label(format!("Version: {}", env!("CARGO_PKG_VERSION")));
+                    ui.horizontal(|ui| {
+                        ui.label("Source code:");
+                        ui.hyperlink_to(
+                            "https://github.com/keocheung/CrabKnife",
+                            "https://github.com/keocheung/CrabKnife",
+                        );
+                    });
+                });
 
-            ui.add_space(14.0);
-            ui.label("UI font size");
-            changed |= ui
-                .add(egui::Slider::new(&mut self.ui_font_size, 12.0..=24.0).suffix(" px"))
-                .changed();
+                ui.add_space(14.0);
 
-            ui.add_space(14.0);
-            changed |= font_weight_picker(
-                ui,
-                "UI font weight",
-                "ui-font-weight",
-                &mut self.ui_font_weight,
-            );
+                panel(ui, "Appearance", |ui| {
+                    if ui.available_width() >= 620.0 {
+                        ui.columns(2, |columns| {
+                            changed |= font_settings_section(
+                                &mut columns[0],
+                                "UI font",
+                                "UI",
+                                "ui-font",
+                                &mut self.ui_font,
+                                &mut self.ui_font_size,
+                                &mut self.ui_font_weight,
+                                &mut self.ui_font_variations,
+                                &self.system_fonts,
+                            );
+                            changed |= font_settings_section(
+                                &mut columns[1],
+                                "Editor font",
+                                "Editor",
+                                "editor-font",
+                                &mut self.editor_font,
+                                &mut self.editor_font_size,
+                                &mut self.editor_font_weight,
+                                &mut self.editor_font_variations,
+                                &self.system_fonts,
+                            );
+                        });
+                    } else {
+                        changed |= font_settings_section(
+                            ui,
+                            "UI font",
+                            "UI",
+                            "ui-font",
+                            &mut self.ui_font,
+                            &mut self.ui_font_size,
+                            &mut self.ui_font_weight,
+                            &mut self.ui_font_variations,
+                            &self.system_fonts,
+                        );
 
-            ui.add_space(14.0);
-            changed |= font_variation_editor(
-                ui,
-                "UI font variations",
-                "ui-font-variations",
-                &mut self.ui_font_variations,
-            );
+                        ui.add_space(18.0);
+                        changed |= font_settings_section(
+                            ui,
+                            "Editor font",
+                            "Editor",
+                            "editor-font",
+                            &mut self.editor_font,
+                            &mut self.editor_font_size,
+                            &mut self.editor_font_weight,
+                            &mut self.editor_font_variations,
+                            &self.system_fonts,
+                        );
+                    }
 
-            ui.add_space(18.0);
-            changed |= font_picker(
-                ui,
-                "Editor font",
-                "editor-font-family",
-                &mut self.editor_font,
-                &self.system_fonts,
-            );
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if self.ui_font == FontChoice::Custom || self.editor_font == FontChoice::Custom
+                    {
+                        ui.add_space(18.0);
+                        changed |= custom_font_loader(
+                            ui,
+                            &mut self.custom_font_path,
+                            &mut self.custom_font_data,
+                            &mut self.custom_font_error,
+                        );
+                    }
 
-            ui.add_space(14.0);
-            ui.label("Editor font size");
-            changed |= ui
-                .add(egui::Slider::new(&mut self.editor_font_size, 12.0..=24.0).suffix(" px"))
-                .changed();
-
-            ui.add_space(14.0);
-            changed |= font_weight_picker(
-                ui,
-                "Editor font weight",
-                "editor-font-weight",
-                &mut self.editor_font_weight,
-            );
-
-            ui.add_space(14.0);
-            changed |= font_variation_editor(
-                ui,
-                "Editor font variations",
-                "editor-font-variations",
-                &mut self.editor_font_variations,
-            );
-
-            #[cfg(not(target_arch = "wasm32"))]
-            if self.ui_font == FontChoice::Custom || self.editor_font == FontChoice::Custom {
-                ui.add_space(18.0);
-                changed |= custom_font_loader(
-                    ui,
-                    &mut self.custom_font_path,
-                    &mut self.custom_font_data,
-                    &mut self.custom_font_error,
-                );
-            }
-
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new(
-                    "UI font is applied to navigation and labels. Editor font is applied to regex and text editors. Weight uses the closest available system font face. Variations apply to system and custom font files that support the selected axes.",
-                )
-                .color(ui.visuals().weak_text_color()),
-            );
+                    ui.add_space(12.0);
+                    ui.label(
+                        RichText::new(
+                            "UI font is applied to navigation and labels. Editor font is applied to regex and text editors. Weight uses the closest available system font face. Variations apply to system and custom font files that support the selected axes. OpenType feature settings are not supported by the current egui text renderer.",
+                        )
+                        .color(ui.visuals().weak_text_color()),
+                    );
+                });
         });
 
         changed
@@ -711,6 +720,10 @@ fn with_font_variations(font_data: FontData, variations: &[FontVariationCoord]) 
     })
 }
 
+fn is_valid_font_tag(tag: &str) -> bool {
+    tag.len() == 4 && tag.bytes().all(|byte| byte.is_ascii_alphanumeric())
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn load_system_fonts() -> (Database, Vec<SystemFont>) {
     let mut database = Database::new();
@@ -817,6 +830,55 @@ fn font_weight_picker(
                     .changed();
             }
         });
+
+    changed
+}
+
+fn font_settings_section(
+    ui: &mut Ui,
+    title: &str,
+    label_prefix: &str,
+    id_prefix: &str,
+    selected_font: &mut FontChoice,
+    font_size: &mut f32,
+    selected_weight: &mut FontWeightChoice,
+    variations: &mut Vec<FontVariationCoord>,
+    system_fonts: &[SystemFont],
+) -> bool {
+    let mut changed = false;
+
+    ui.label(RichText::new(title).strong());
+    ui.add_space(10.0);
+
+    changed |= font_picker(
+        ui,
+        &format!("{label_prefix} font"),
+        &format!("{id_prefix}-family"),
+        selected_font,
+        system_fonts,
+    );
+
+    ui.add_space(14.0);
+    ui.label(format!("{label_prefix} font size"));
+    changed |= ui
+        .add(egui::Slider::new(font_size, 12.0..=24.0).suffix(" px"))
+        .changed();
+
+    ui.add_space(14.0);
+    changed |= font_weight_picker(
+        ui,
+        &format!("{label_prefix} font weight"),
+        &format!("{id_prefix}-weight"),
+        selected_weight,
+    );
+
+    ui.add_space(14.0);
+    changed |= font_variation_editor(
+        ui,
+        &format!("{label_prefix} font variations"),
+        &format!("{id_prefix}-variations"),
+        variations,
+    );
 
     changed
 }

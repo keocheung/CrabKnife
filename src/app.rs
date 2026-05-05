@@ -149,10 +149,9 @@ impl CrabKnifeApp {
             "Password Generator",
         );
         nav_button(ui, &mut self.active_tool, Tool::QrCode, "QR", "QR Code");
-        nav_button(ui, &mut self.active_tool, Tool::Settings, "Aa", "Settings");
 
         ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-            ui.label(RichText::new("v0.1.0").color(ui.visuals().weak_text_color()));
+            nav_button(ui, &mut self.active_tool, Tool::Settings, "⚙", "Settings");
         });
     }
 

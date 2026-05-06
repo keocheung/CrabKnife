@@ -14,8 +14,8 @@ md-5 = "0.10.6"
 qrcode = "0.14.1"
 regex = "1"
 rfd = { version = "0.15.4", features = ["file-handle-inner"] }
-sha1 = { version = "0.10.6", features = ["asm"] }
-sha2 = { version = "0.10.9", features = ["asm"] }
+sha1 = "0.10.6"
+sha2 = "0.10.9"
 toml_edit = "0.25.11"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -41,4 +41,5 @@ opt-level = 3
 [package.metadata.packager]
 productName = "CrabKnife"
 identifier = "moe.keo.crabknife"
+formats = ["wix"]
 before-packaging-command = "cargo build --release"

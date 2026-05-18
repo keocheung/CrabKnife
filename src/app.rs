@@ -7,6 +7,7 @@ use eframe::egui::{
 
 use crate::settings::Settings;
 use crate::tools::base64::Base64Tool;
+use crate::tools::float::FloatTool;
 use crate::tools::hash::HashTool;
 use crate::tools::hex::HexTool;
 use crate::tools::password::PasswordTool;
@@ -22,6 +23,7 @@ pub(crate) enum Tool {
     Base64,
     Hash,
     Radix,
+    Float,
     Password,
     QrCode,
     Settings,
@@ -34,6 +36,7 @@ pub(crate) struct CrabKnifeApp {
     base64: Base64Tool,
     hash: HashTool,
     radix: RadixTool,
+    float: FloatTool,
     password: PasswordTool,
     qr: QrTool,
     settings: Settings,
@@ -49,6 +52,7 @@ impl CrabKnifeApp {
             base64: Base64Tool::default(),
             hash: HashTool::default(),
             radix: RadixTool::default(),
+            float: FloatTool::default(),
             password: PasswordTool::default(),
             qr: QrTool::default(),
             settings,
@@ -155,6 +159,13 @@ impl CrabKnifeApp {
         nav_button(
             ui,
             &mut self.active_tool,
+            Tool::Float,
+            "f",
+            "Float Converter",
+        );
+        nav_button(
+            ui,
+            &mut self.active_tool,
             Tool::Password,
             "**",
             "Password Generator",
@@ -174,6 +185,7 @@ impl CrabKnifeApp {
                 Tool::Base64 => "Base64",
                 Tool::Hash => "Hash",
                 Tool::Radix => "Radix Converter",
+                Tool::Float => "Float Converter",
                 Tool::Password => "Password Generator",
                 Tool::QrCode => "QR Code",
                 Tool::Settings => "Settings",
@@ -222,6 +234,7 @@ impl eframe::App for CrabKnifeApp {
                 Tool::Base64 => self.base64.ui(ui),
                 Tool::Hash => self.hash.ui(ui),
                 Tool::Radix => self.radix.ui(ui),
+                Tool::Float => self.float.ui(ui),
                 Tool::Password => self.password.ui(ui),
                 Tool::QrCode => self.qr.ui(ui),
                 Tool::Settings => {

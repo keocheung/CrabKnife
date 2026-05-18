@@ -11,6 +11,7 @@ use crate::tools::hash::HashTool;
 use crate::tools::hex::HexTool;
 use crate::tools::password::PasswordTool;
 use crate::tools::qr::QrTool;
+use crate::tools::radix::RadixTool;
 use crate::tools::regex::RegexTool;
 use crate::ui::nav_button;
 
@@ -20,6 +21,7 @@ pub(crate) enum Tool {
     HexToString,
     Base64,
     Hash,
+    Radix,
     Password,
     QrCode,
     Settings,
@@ -31,6 +33,7 @@ pub(crate) struct CrabKnifeApp {
     hex: HexTool,
     base64: Base64Tool,
     hash: HashTool,
+    radix: RadixTool,
     password: PasswordTool,
     qr: QrTool,
     settings: Settings,
@@ -45,6 +48,7 @@ impl CrabKnifeApp {
             hex: HexTool::default(),
             base64: Base64Tool::default(),
             hash: HashTool::default(),
+            radix: RadixTool::default(),
             password: PasswordTool::default(),
             qr: QrTool::default(),
             settings,
@@ -144,6 +148,13 @@ impl CrabKnifeApp {
         nav_button(
             ui,
             &mut self.active_tool,
+            Tool::Radix,
+            "±2",
+            "Radix Converter",
+        );
+        nav_button(
+            ui,
+            &mut self.active_tool,
             Tool::Password,
             "**",
             "Password Generator",
@@ -162,6 +173,7 @@ impl CrabKnifeApp {
                 Tool::HexToString => "Hex to String",
                 Tool::Base64 => "Base64",
                 Tool::Hash => "Hash",
+                Tool::Radix => "Radix Converter",
                 Tool::Password => "Password Generator",
                 Tool::QrCode => "QR Code",
                 Tool::Settings => "Settings",
@@ -209,6 +221,7 @@ impl eframe::App for CrabKnifeApp {
                 Tool::HexToString => self.hex.ui(ui),
                 Tool::Base64 => self.base64.ui(ui),
                 Tool::Hash => self.hash.ui(ui),
+                Tool::Radix => self.radix.ui(ui),
                 Tool::Password => self.password.ui(ui),
                 Tool::QrCode => self.qr.ui(ui),
                 Tool::Settings => {

@@ -49,5 +49,5 @@ opt-level = 3
 [package.metadata.packager]
 productName = "CrabKnife"
 identifier = "moe.keo.crabknife"
-formats = ["wix"]
+formats = ["wix", "dmg"]
 before-packaging-command = "cargo build --release"

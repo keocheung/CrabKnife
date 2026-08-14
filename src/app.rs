@@ -1,253 +1,313 @@
-use std::sync::Arc;
-
-use eframe::egui::{
-    self, Align, CentralPanel, Color32, Context, FontDefinitions, FontFamily, FontId, Frame,
-    Layout, Margin, Panel, RichText, TextStyle, Ui, Vec2,
+use base64::{Engine as _, engine::general_purpose};
+use gpui::{
+    App, AppContext, Context, Entity, IntoElement, ParentElement, Render, Styled, Window, div,
+    prelude::FluentBuilder as _, px,
 };
-
-use crate::settings::Settings;
-use crate::tools::base64::Base64Tool;
-use crate::tools::float::FloatTool;
-use crate::tools::hash::HashTool;
-use crate::tools::hex::HexTool;
-use crate::tools::password::PasswordTool;
-use crate::tools::qr::QrTool;
-use crate::tools::radix::RadixTool;
-use crate::tools::regex::RegexTool;
-use crate::ui::nav_button;
+use gpui_component::{
+    ActiveTheme, StyledExt as _, button::Button, button::ButtonVariants as _, input::Input,
+    input::InputState,
+};
+use md5::Md5;
+use regex::Regex;
+use sha2::{Digest, Sha256};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Tool {
-    RegexTester,
-    HexToString,
+enum Tool {
+    Regex,
+    Hex,
     Base64,
     Hash,
     Radix,
     Float,
     Password,
-    QrCode,
-    Settings,
+    Qr,
 }
 
-pub(crate) struct CrabKnifeApp {
-    active_tool: Tool,
-    regex: RegexTool,
-    hex: HexTool,
-    base64: Base64Tool,
-    hash: HashTool,
-    radix: RadixTool,
-    float: FloatTool,
-    password: PasswordTool,
-    qr: QrTool,
-    settings: Settings,
-    font_needs_update: bool,
-}
+impl Tool {
+    const ALL: [Self; 8] = [
+        Self::Regex,
+        Self::Hex,
+        Self::Base64,
+        Self::Hash,
+        Self::Radix,
+        Self::Float,
+        Self::Password,
+        Self::Qr,
+    ];
 
-impl CrabKnifeApp {
-    pub(crate) fn new(cc: &eframe::CreationContext<'_>, settings: Settings) -> Self {
-        let app = Self {
-            active_tool: Tool::RegexTester,
-            regex: RegexTool::default(),
-            hex: HexTool::default(),
-            base64: Base64Tool::default(),
-            hash: HashTool::default(),
-            radix: RadixTool::default(),
-            float: FloatTool::default(),
-            password: PasswordTool::default(),
-            qr: QrTool::default(),
-            settings,
-            font_needs_update: true,
-        };
-
-        cc.egui_ctx.set_theme(egui::ThemePreference::System);
-        app.apply_font_settings(&cc.egui_ctx);
-        app
-    }
-
-    fn apply_font_settings(&self, ctx: &Context) {
-        let mut fonts = FontDefinitions::default();
-        if let Some(font_data) = self.settings.ui_font_data() {
-            fonts
-                .font_data
-                .insert("crab-knife-ui-font".to_owned(), Arc::new(font_data));
-            fonts
-                .families
-                .entry(FontFamily::Proportional)
-                .or_default()
-                .insert(0, "crab-knife-ui-font".to_owned());
+    fn label(self) -> &'static str {
+        match self {
+            Self::Regex => "Regex Tester",
+            Self::Hex => "Hex to String",
+            Self::Base64 => "Base64",
+            Self::Hash => "Hash / Checksum",
+            Self::Radix => "Radix Converter",
+            Self::Float => "Float Converter",
+            Self::Password => "Password Generator",
+            Self::Qr => "QR Code",
         }
-        if let Some(font_data) = self.settings.editor_font_data() {
-            fonts
-                .font_data
-                .insert("crab-knife-editor-font".to_owned(), Arc::new(font_data));
-            fonts
-                .families
-                .entry(FontFamily::Monospace)
-                .or_default()
-                .insert(0, "crab-knife-editor-font".to_owned());
+    }
+
+    fn hint(self) -> &'static str {
+        match self {
+            Self::Regex => "Enter pattern on the first line and test text below it",
+            Self::Hex => "Paste hexadecimal bytes (spaces and 0x prefixes are allowed)",
+            Self::Base64 => "Enter plain text to encode, or prefix encoded data with decode:",
+            Self::Hash => "Enter text to calculate SHA-256 and MD5 digests",
+            Self::Radix => "Enter a decimal integer",
+            Self::Float => "Enter a decimal floating-point number",
+            Self::Password => "Enter the desired password length (8–128)",
+            Self::Qr => "Enter the text to place in the QR code",
         }
-        ctx.set_fonts(fonts);
-
-        let ui_size = self.settings.ui_font_size();
-        let editor_size = self.settings.editor_font_size();
-        let ui_family = self.settings.ui_font_family();
-        let editor_family = self.settings.editor_font_family();
-        ctx.all_styles_mut(|style| {
-            style.text_styles = [
-                (
-                    TextStyle::Heading,
-                    FontId::new(ui_size + 8.0, ui_family.clone()),
-                ),
-                (TextStyle::Body, FontId::new(ui_size, ui_family.clone())),
-                (
-                    TextStyle::Monospace,
-                    FontId::new(editor_size, editor_family.clone()),
-                ),
-                (TextStyle::Button, FontId::new(ui_size, ui_family.clone())),
-                (
-                    TextStyle::Small,
-                    FontId::new((ui_size - 2.0).max(10.0), ui_family.clone()),
-                ),
-            ]
-            .into();
-            style.spacing.item_spacing = Vec2::new(10.0, 8.0);
-        });
-        ctx.style_mut_of(egui::Theme::Dark, |style| {
-            style.visuals.weak_text_color = Some(Color32::from_gray(215));
-            style.visuals.window_fill = Color32::from_gray(14);
-            style.visuals.panel_fill = Color32::from_gray(14);
-            style.visuals.extreme_bg_color = Color32::from_gray(2);
-            style.visuals.text_edit_bg_color = Some(Color32::from_gray(4));
-        });
-    }
-
-    fn show_sidebar(&mut self, ui: &mut Ui) {
-        ui.add_space(8.0);
-        ui.heading("CrabKnife");
-        ui.label(RichText::new("Developer tools").color(ui.visuals().weak_text_color()));
-        ui.add_space(18.0);
-
-        nav_button(
-            ui,
-            &mut self.active_tool,
-            Tool::RegexTester,
-            ".*",
-            "Regex Tester",
-        );
-        nav_button(
-            ui,
-            &mut self.active_tool,
-            Tool::HexToString,
-            "0x",
-            "Hex to String",
-        );
-        nav_button(ui, &mut self.active_tool, Tool::Base64, "64", "Base64");
-        nav_button(
-            ui,
-            &mut self.active_tool,
-            Tool::Hash,
-            "#",
-            "Hash / Checksum",
-        );
-        nav_button(
-            ui,
-            &mut self.active_tool,
-            Tool::Radix,
-            "±2",
-            "Radix Converter",
-        );
-        nav_button(
-            ui,
-            &mut self.active_tool,
-            Tool::Float,
-            "f",
-            "Float Converter",
-        );
-        nav_button(
-            ui,
-            &mut self.active_tool,
-            Tool::Password,
-            "**",
-            "Password Generator",
-        );
-        nav_button(ui, &mut self.active_tool, Tool::QrCode, "QR", "QR Code");
-
-        ui.with_layout(Layout::bottom_up(Align::LEFT), |ui| {
-            nav_button(ui, &mut self.active_tool, Tool::Settings, "⚙", "Settings");
-        });
-    }
-
-    fn show_header(&self, ui: &mut Ui) {
-        ui.horizontal(|ui| {
-            ui.heading(match self.active_tool {
-                Tool::RegexTester => "Regex Tester",
-                Tool::HexToString => "Hex to String",
-                Tool::Base64 => "Base64",
-                Tool::Hash => "Hash",
-                Tool::Radix => "Radix Converter",
-                Tool::Float => "Float Converter",
-                Tool::Password => "Password Generator",
-                Tool::QrCode => "QR Code",
-                Tool::Settings => "Settings",
-            });
-        });
     }
 }
 
-impl eframe::App for CrabKnifeApp {
-    fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
-        let ctx = ui.ctx().clone();
+pub(crate) struct CrabKnife {
+    active: Tool,
+    input: Entity<InputState>,
+    output: Entity<InputState>,
+}
 
-        if self.font_needs_update {
-            self.apply_font_settings(&ctx);
-            self.font_needs_update = false;
+impl CrabKnife {
+    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .multi_line(true)
+                .rows(12)
+                .placeholder(Tool::Regex.hint())
+                .default_value("\\b(\\w+)@\\w+\\.\\w+\\b\nSend logs to dev@example.com")
+        });
+        let output = cx.new(|cx| {
+            InputState::new(window, cx)
+                .multi_line(true)
+                .rows(12)
+                .placeholder("Results appear here")
+        });
+        Self {
+            active: Tool::Regex,
+            input,
+            output,
         }
+    }
 
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let vp = ctx.input(|i| i.viewport().clone());
-            if let (Some(outer), Some(inner)) = (vp.outer_rect, vp.inner_rect) {
-                self.settings
-                    .set_window_geometry([outer.min.x, outer.min.y], inner.size().into());
-            }
-        }
+    fn run(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let value = self.input.read(cx).value().to_string();
+        let result = transform(self.active, &value);
+        self.output
+            .update(cx, |state, cx| state.set_value(result, window, cx));
+        cx.notify();
+    }
+}
 
-        let style = ctx.global_style();
+impl Render for CrabKnife {
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let theme = cx.theme();
+        let entity = cx.entity();
+        let sidebar = Tool::ALL.into_iter().enumerate().fold(
+            div()
+                .v_flex()
+                .gap_1()
+                .p_4()
+                .w(px(224.))
+                .h_full()
+                .border_r_1()
+                .border_color(theme.border),
+            |column, (index, tool)| {
+                let selected = self.active == tool;
+                let entity = entity.clone();
+                column.child(
+                    Button::new(("nav-tool", index))
+                        .label(tool.label())
+                        .w_full()
+                        .map(|button| {
+                            if selected {
+                                button.primary()
+                            } else {
+                                button.ghost()
+                            }
+                        })
+                        .on_click(move |_, _, cx: &mut App| {
+                            entity.update(cx, |app, cx| {
+                                app.active = tool;
+                                cx.notify();
+                            });
+                        }),
+                )
+            },
+        );
 
-        Panel::left("tools")
-            .resizable(false)
-            .exact_size(220.0)
-            .frame(Frame::side_top_panel(&style).inner_margin(Margin::same(18)))
-            .show_inside(ui, |ui| self.show_sidebar(ui));
+        let run_entity = entity.clone();
+        div()
+            .h_flex()
+            .size_full()
+            .bg(theme.background)
+            .text_color(theme.foreground)
+            .child(
+                sidebar
+                    .child(div().mt_4().text_xl().font_semibold().child("CrabKnife"))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(theme.muted_foreground)
+                            .child("Developer tools · GPUI"),
+                    ),
+            )
+            .child(
+                div()
+                    .v_flex()
+                    .flex_1()
+                    .h_full()
+                    .overflow_hidden()
+                    .child(
+                        div()
+                            .h(px(68.))
+                            .px_6()
+                            .items_center()
+                            .border_b_1()
+                            .border_color(theme.border)
+                            .child(div().text_2xl().font_semibold().child(self.active.label())),
+                    )
+                    .child(
+                        div()
+                            .v_flex()
+                            .gap_4()
+                            .p_6()
+                            .flex_1()
+                            .overflow_hidden()
+                            .child(
+                                div()
+                                    .text_color(theme.muted_foreground)
+                                    .child(self.active.hint()),
+                            )
+                            .child(card("Input", Input::new(&self.input).h(px(230.))))
+                            .child(
+                                Button::new("run-tool")
+                                    .primary()
+                                    .label("Run conversion")
+                                    .on_click(move |_, window, cx| {
+                                        run_entity.update(cx, |app, cx| app.run(window, cx));
+                                    }),
+                            )
+                            .child(card("Output", Input::new(&self.output).h(px(230.)))),
+                    ),
+            )
+    }
+}
 
-        Panel::top("header")
-            .resizable(false)
-            .exact_size(64.0)
-            .frame(Frame::side_top_panel(&style).inner_margin(Margin::symmetric(22, 12)))
-            .show_inside(ui, |ui| self.show_header(ui));
+fn card(title: &'static str, child: impl IntoElement) -> impl IntoElement {
+    div()
+        .v_flex()
+        .gap_3()
+        .p_4()
+        .border_1()
+        .rounded_lg()
+        .child(div().font_semibold().child(title))
+        .child(child)
+}
 
-        CentralPanel::default()
-            .frame(Frame::central_panel(&style).inner_margin(Margin::same(22)))
-            .show_inside(ui, |ui| match self.active_tool {
-                Tool::RegexTester => self.regex.ui(ui),
-                Tool::HexToString => self.hex.ui(ui),
-                Tool::Base64 => self.base64.ui(ui),
-                Tool::Hash => self.hash.ui(ui),
-                Tool::Radix => self.radix.ui(ui),
-                Tool::Float => self.float.ui(ui),
-                Tool::Password => self.password.ui(ui),
-                Tool::QrCode => self.qr.ui(ui),
-                Tool::Settings => {
-                    if self.settings.ui(ui) {
-                        self.font_needs_update = true;
-                        self.settings.save();
+fn transform(tool: Tool, text: &str) -> String {
+    match tool {
+        Tool::Regex => {
+            let (pattern, haystack) = text.split_once('\n').unwrap_or((text, ""));
+            match Regex::new(pattern) {
+                Ok(regex) => {
+                    let matches: Vec<_> = regex
+                        .find_iter(haystack)
+                        .enumerate()
+                        .map(|(i, m)| {
+                            format!("#{}  {}..{}  {}", i + 1, m.start(), m.end(), m.as_str())
+                        })
+                        .collect();
+                    if matches.is_empty() {
+                        "No matches.".into()
+                    } else {
+                        matches.join("\n")
                     }
                 }
-            });
+                Err(error) => format!("Invalid pattern: {error}"),
+            }
+        }
+        Tool::Hex => {
+            let clean: String = text
+                .replace("0x", "")
+                .chars()
+                .filter(|c| c.is_ascii_hexdigit())
+                .collect();
+            let bytes: Result<Vec<_>, _> = (0..clean.len() / 2)
+                .map(|i| u8::from_str_radix(&clean[i * 2..i * 2 + 2], 16))
+                .collect();
+            bytes
+                .map(|b| String::from_utf8_lossy(&b).into_owned())
+                .unwrap_or_else(|e| e.to_string())
+        }
+        Tool::Base64 => text.strip_prefix("decode:").map_or_else(
+            || general_purpose::STANDARD.encode(text),
+            |encoded| {
+                general_purpose::STANDARD
+                    .decode(encoded.trim())
+                    .map(|b| String::from_utf8_lossy(&b).into_owned())
+                    .unwrap_or_else(|e| e.to_string())
+            },
+        ),
+        Tool::Hash => format!(
+            "SHA-256  {:x}\nMD5      {:x}",
+            Sha256::digest(text.as_bytes()),
+            Md5::digest(text.as_bytes())
+        ),
+        Tool::Radix => text
+            .trim()
+            .parse::<i128>()
+            .map(|n| format!("Hex     {n:#x}\nOctal   {n:#o}\nBinary  {n:#b}"))
+            .unwrap_or_else(|e| e.to_string()),
+        Tool::Float => text
+            .trim()
+            .parse::<f64>()
+            .map(|n| {
+                format!(
+                    "f64 bits  0x{:016X}\nBinary    {:064b}",
+                    n.to_bits(),
+                    n.to_bits()
+                )
+            })
+            .unwrap_or_else(|e| e.to_string()),
+        Tool::Password => {
+            let len = text.trim().parse::<usize>().unwrap_or(24).clamp(8, 128);
+            const ALPHABET: &[u8] =
+                b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789!@#$%^&*";
+            let mut bytes = vec![0_u8; len];
+            if getrandom::fill(&mut bytes).is_err() {
+                return "Unable to access secure randomness".into();
+            }
+            bytes
+                .into_iter()
+                .map(|b| ALPHABET[b as usize % ALPHABET.len()] as char)
+                .collect()
+        }
+        Tool::Qr => match qrcode::QrCode::new(text.as_bytes()) {
+            Ok(code) => format!(
+                "QR code ready\n{} × {} modules\n{} bytes encoded",
+                code.width(),
+                code.width(),
+                text.len()
+            ),
+            Err(error) => error.to_string(),
+        },
     }
+}
 
-    #[cfg(not(target_arch = "wasm32"))]
-    fn on_exit(&mut self) {
-        self.settings.save();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn base64_conversion() {
+        assert_eq!(transform(Tool::Base64, "CrabKnife"), "Q3JhYktuaWZl");
+    }
+    #[test]
+    fn hex_conversion() {
+        assert_eq!(transform(Tool::Hex, "43 72 61 62"), "Crab");
+    }
+    #[test]
+    fn regex_conversion() {
+        assert!(transform(Tool::Regex, r"\d+\nabc 42").contains("42"));
     }
 }

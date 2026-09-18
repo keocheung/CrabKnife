@@ -153,29 +153,7 @@ impl RegexTool {
 
                 ui.add_space(14.0);
                 panel(ui, "Test Text", |ui| {
-                    let matches = &self.cached_matches;
-                    let mut layouter = |ui: &Ui, text: &dyn TextBuffer, wrap_width: f32| {
-                        let font_id = TextStyle::Monospace.resolve(ui.style());
-                        let visuals = ui.visuals();
-                        let job = highlighted_text_job(
-                            text.as_str(),
-                            matches,
-                            font_id,
-                            visuals.text_color(),
-                            visuals.dark_mode,
-                            wrap_width,
-                        );
-                        ui.fonts_mut(|fonts| fonts.layout_job(job))
-                    };
-
-                    ui.add(
-                        TextEdit::multiline(&mut self.test_text)
-                            .font(TextStyle::Monospace)
-                            .desired_rows(22)
-                            .desired_width(f32::INFINITY)
-                            .layouter(&mut layouter)
-                            .hint_text("Paste text to test against the expression"),
-                    );
+                    self.test_text_edit(ui);
                 });
             });
 
@@ -184,6 +162,40 @@ impl RegexTool {
                 panel(ui, "Matches", |ui| self.match_list(ui));
             });
         });
+    }
+
+    fn test_text_edit(&mut self, ui: &mut Ui) -> eframe::egui::Response {
+        let matches = &mut self.cached_matches;
+        let cached_text = &mut self.cached_test_text;
+        let regex = self.cached_regex.as_ref();
+        let mut layouter = |ui: &Ui, text: &dyn TextBuffer, wrap_width: f32| {
+            // TextEdit can call the layouter again after editing within this frame.
+            // Match offsets must belong to the exact text being laid out.
+            if text.as_str() != cached_text {
+                *matches = collect_matches(regex, text.as_str());
+                text.as_str().clone_into(cached_text);
+            }
+            let font_id = TextStyle::Monospace.resolve(ui.style());
+            let visuals = ui.visuals();
+            let job = highlighted_text_job(
+                text.as_str(),
+                matches,
+                font_id,
+                visuals.text_color(),
+                visuals.dark_mode,
+                wrap_width,
+            );
+            ui.fonts_mut(|fonts| fonts.layout_job(job))
+        };
+
+        ui.add(
+            TextEdit::multiline(&mut self.test_text)
+                .font(TextStyle::Monospace)
+                .desired_rows(22)
+                .desired_width(f32::INFINITY)
+                .layouter(&mut layouter)
+                .hint_text("Paste text to test against the expression"),
+        )
     }
 
     fn match_list(&self, ui: &mut Ui) {
@@ -757,4 +769,76 @@ fn group_background(group_index: usize, dark_mode: bool) -> Color32 {
     ];
     let colors = if dark_mode { DARK_COLORS } else { LIGHT_COLORS };
     colors[(group_index - 1) % colors.len()]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use eframe::egui::text::{CCursor, CCursorRange};
+    use eframe::egui::{CentralPanel, Context, Event, Key, Modifiers, RawInput};
+
+    fn replace_selected_text(event: Event, expected: &str) {
+        let ctx = Context::default();
+        let mut tool = RegexTool::default();
+        let mut editor_id = None;
+        let _ = ctx.run_ui(RawInput::default(), |ui| {
+            CentralPanel::default().show_inside(ui, |ui| {
+                editor_id = Some(tool.test_text_edit(ui).id);
+            });
+        });
+        let id = editor_id.unwrap();
+        ctx.memory_mut(|memory| memory.request_focus(id));
+        let mut state = TextEdit::load_state(&ctx, id).unwrap();
+        state.cursor.set_char_range(Some(CCursorRange::two(
+            CCursor::new(0),
+            CCursor::new(tool.test_text.chars().count()),
+        )));
+        state.store(&ctx, id);
+        let _ = ctx.run_ui(
+            RawInput {
+                events: vec![event],
+                ..Default::default()
+            },
+            |ui| {
+                CentralPanel::default().show_inside(ui, |ui| {
+                    tool.test_text_edit(ui);
+                });
+            },
+        );
+        assert_eq!(tool.test_text, expected);
+        assert_eq!(tool.cached_test_text, expected);
+        let expected_matches = collect_matches(tool.cached_regex.as_ref(), expected);
+        assert_eq!(tool.cached_matches.len(), expected_matches.len());
+        for (actual, expected) in tool.cached_matches.iter().zip(expected_matches) {
+            assert_eq!(
+                (&actual.text, actual.start, actual.end),
+                (&expected.text, expected.start, expected.end)
+            );
+        }
+    }
+
+    #[test]
+    fn backspace_after_select_all() {
+        replace_selected_text(
+            Event::Key {
+                key: Key::Backspace,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: Modifiers::NONE,
+            },
+            "",
+        );
+    }
+
+    #[test]
+    fn replace_selection_with_unicode() {
+        let text = "中文🙂测试 dev@example.com";
+        replace_selected_text(Event::Text(text.to_owned()), text);
+    }
+
+    #[test]
+    fn replace_selection_with_shorter_text() {
+        replace_selected_text(Event::Text("a@b.co".to_owned()), "a@b.co");
+    }
 }
